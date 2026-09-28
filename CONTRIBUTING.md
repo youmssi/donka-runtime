@@ -7,7 +7,7 @@ fork-specific rules from `AGENTS.md`.
 
 | Branch | Role | Who writes to it |
 |---|---|---|
-| `main` | What customers run | Release PRs only (`develop` → `main`, merge commit) |
+| `main` | What customers run | Promotion PRs (`develop` → `main`, merge commit) and the release PR |
 | `develop` | The next release, always green | Squash-merged story PRs only |
 | `dnk-<n>-<slug>` | One story | Its author |
 
