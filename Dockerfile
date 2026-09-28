@@ -12,7 +12,7 @@ RUN mkdir src \
     && echo 'fn main() {}' > src/main.rs \
     && touch src/lib.rs \
     && cargo build --release \
-    && rm -rf src target/release/.fingerprint/agent-*
+    && rm -rf src target/release/.fingerprint/donka-runtime-* target/release/.fingerprint/agent-*
 
 FROM rust:1.96 AS builder
 
@@ -29,7 +29,7 @@ RUN cargo build --release
 FROM gcr.io/distroless/cc-debian13:nonroot AS runner
 
 WORKDIR /home/nonroot
-COPY --from=builder /app/target/release/agent ./app
+COPY --from=builder /app/target/release/donka-runtime ./app
 
 ARG SERVICE_VERSION=unknown
 ENV SERVICE_VERSION=$SERVICE_VERSION

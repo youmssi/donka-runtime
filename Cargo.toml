@@ -1,8 +1,19 @@
 [package]
-name = "agent"
+name = "donka-runtime"
 version = "1.28.1"
 authors = ["GoRules <hi@gorules.io>"]
 edition = "2024"
+description = "Donka Runtime: serves decisions from published release artifacts"
+
+# The library keeps the upstream crate name so sources and tests stay identical to
+# gorules/agent-public and upstream merges stay clean; only the binary is renamed.
+[lib]
+name = "agent"
+path = "src/lib.rs"
+
+[[bin]]
+name = "donka-runtime"
+path = "src/main.rs"
 
 [dependencies]
 axum = { version = "0.8", features = ["macros"] }
@@ -46,8 +57,8 @@ utoipa-swagger-ui-vendored = "0.1"
 walkdir = "2.5"
 tsgo-wasm = "0.3"
 mimalloc = { version = "*" }
-zen-engine = { version = "1.0.0-beta.12", features = ["arbitrary_precision"] }
-zen-expression = { version = "1.0.0-beta.12", features = ["arbitrary_precision"] }
+zen-engine = { version = "=2.0.1", features = ["arbitrary_precision"] }
+zen-expression = { version = "=2.0.1", features = ["arbitrary_precision"] }
 zip = { version = "8.6", default-features = false, features = [
     "aes-crypto",
     "bzip2",

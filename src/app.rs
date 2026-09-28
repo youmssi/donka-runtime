@@ -74,12 +74,7 @@ fn openapi() -> utoipa::openapi::OpenApi {
         .title(env!("CARGO_PKG_NAME"))
         .version(service_version)
         .description(Some(env!("CARGO_PKG_DESCRIPTION").to_string()))
-        .contact(Some(
-            ContactBuilder::new()
-                .name(Some("GoRules"))
-                .email(Some("hi@gorules.io"))
-                .build(),
-        ))
+        .contact(Some(ContactBuilder::new().name(Some("Donka")).build()))
         .build();
 
     utoipa::openapi::OpenApi::new(openapi_info, utoipa::openapi::Paths::new())

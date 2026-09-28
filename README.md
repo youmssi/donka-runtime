@@ -1,8 +1,8 @@
-# GoRules Agent
+# Donka Runtime
 
-[Website](https://gorules.io) | [Documentation](https://docs.gorules.io) | [GitHub - public mirror](https://github.com/gorules/agent-public)
+Part of [Donka](https://github.com/youmssi/donka). Fork of [gorules/agent-public](https://github.com/gorules/agent-public) (MIT); see [DONKA.md](DONKA.md) for what Donka changes.
 
-The GoRules Agent is an Open-source, standalone microservice that acts as a high-performance Rules Engine over REST, without requiring a UI. It is designed to pull Releases from Object Storage, automatically re-load them at runtime when changes occur, and evaluate decision models efficiently. This ensures that your rules are always up-to-date and accessible with minimal configuration.
+Donka Runtime is an open-source, standalone microservice that acts as a high-performance Rules Engine over REST, without requiring a UI. It is designed to pull Releases from Object Storage, automatically re-load them at runtime when changes occur, and evaluate decision models efficiently. This ensures that your rules are always up-to-date and accessible with minimal configuration.
 
 ## Environment Variables
 
