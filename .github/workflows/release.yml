@@ -1,0 +1,47 @@
+name: Release
+
+# Versions and changelogs from Conventional Commits (DNK-30).
+#
+# 1. A promotion PR merges develop into main (merge commit).
+# 2. On every push to main, release-please keeps one release PR open with the next
+#    version and the CHANGELOG entry.
+# 3. Merging the release PR tags vX.Y.Z and creates the GitHub release; this workflow
+#    then opens a back-merge PR main -> develop (merge commit) so the bump reaches develop.
+#
+# Nothing is published to a package registry: the Runtime ships as a container image (DNK-28).
+# With GITHUB_TOKEN, CI does not run on the PRs this workflow opens; set a
+# RELEASE_PLEASE_TOKEN secret (fine-grained PAT: contents + pull requests, write) to have it run.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Open the back-merge PR into develop
+        if: steps.release.outputs.release_created
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          gh pr create --repo "$GITHUB_REPOSITORY" --base develop --head main \
+            --title "chore: bring release $TAG back into develop" \
+            --body "Merge with a **merge commit** (not squash) so develop and main share the release commit."

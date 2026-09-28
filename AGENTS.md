@@ -76,7 +76,10 @@ progress; ready when checks are green. Answer every review comment.
 
 ## 7. Releases
 
-`develop` → `main` through a release PR merged with a merge commit. The Runtime releases before
+`develop` → `main` through a promotion PR merged with a merge commit; release-please's release PR
+on `main` then sets the version and `CHANGELOG.md`, tags it, and opens a back-merge PR into
+`develop` (merge commit). `feat` bumps the minor version, `fix`/`perf` the patch, `!` a major.
+The Runtime releases before
 Studio whenever the artifact format or the Runtime API changes. After deploy: `GET /api/health`
 and one evaluate against a known release.
 
