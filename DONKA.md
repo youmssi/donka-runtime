@@ -1,0 +1,20 @@
+# Donka Runtime
+
+The decision-serving service of [Donka](https://github.com/youmssi/donka). It loads published
+release artifacts from object storage, hot-reloads them, and evaluates decisions over REST.
+
+This repository is a fork of [gorules/agent-public](https://github.com/gorules/agent-public)
+(MIT). The upstream history is preserved; the `upstream` remote points at it and is merged
+regularly. The original license and copyright notice in `LICENSE` stay as they are.
+
+## Planned Donka changes (see donka/docs/ROADMAP.md, epic D)
+
+| Item | Change |
+|---|---|
+| D1 | Rebrand; upgrade zen-engine to 2.0.1 (same pin as Studio, enforced by Studio's drift check) |
+| D2 | Hashed, per-environment access tokens in `.config/project.json` |
+| D3 | Connector handler (custom-node adapter) with secrets from env/vault, timeouts, retries |
+| D4 | Decision-log emitter: ships input, output, release and trace to Studio asynchronously |
+| D5 | Rate limiting on evaluate routes |
+
+Changes are kept behind small extension points so upstream merges stay easy.
