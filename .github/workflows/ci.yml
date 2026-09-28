@@ -1,0 +1,39 @@
+name: CI
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+# Least privilege; a newer push to the same branch or PR cancels the older run.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Precompiled tsgo module, kept across runs (see README "Build caching").
+  TSGO_CWASM_CACHE: .tsgo-cache
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: .tsgo-cache
+          key: tsgo-${{ runner.os }}-${{ hashFiles('build.rs', 'Cargo.lock') }}
+      - run: cargo fmt --check
+      # Upstream code carries existing clippy warnings that we do not rewrite (AGENTS.md §5):
+      # warnings are reported, errors fail the build.
+      - run: cargo clippy --all-targets --locked
+      # tests/it starts MinIO and Azurite containers; GitHub runners provide Docker.
+      - run: cargo test --locked

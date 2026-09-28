@@ -17,7 +17,7 @@ fn get_resource() -> Resource {
     RESOURCE
         .get_or_init(|| {
             Resource::builder()
-                .with_service_name("gorules-agent")
+                .with_service_name(env!("CARGO_PKG_NAME"))
                 .build()
         })
         .clone()

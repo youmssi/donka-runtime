@@ -40,61 +40,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "agent"
-version = "1.28.1"
-dependencies = [
- "anyhow",
- "async-trait",
- "aws-config",
- "aws-sdk-s3",
- "axum",
- "axum-macros",
- "axum-server",
- "axum-tracing-opentelemetry",
- "azure_core",
- "azure_identity",
- "azure_storage_blob",
- "base64 0.23.1",
- "chrono",
- "config",
- "dashmap",
- "dotenvy",
- "futures",
- "gcloud-storage",
- "itertools 0.15.0",
- "mimalloc",
- "opentelemetry",
- "opentelemetry-appender-tracing",
- "opentelemetry-otlp",
- "opentelemetry-semantic-conventions",
- "opentelemetry_sdk",
- "rustls",
- "serde",
- "serde_json",
- "strum 0.28.0",
- "strum_macros 0.28.0",
- "testcontainers",
- "tokio",
- "tokio-util",
- "tower",
- "tower-http 0.7.0",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
- "tsgo-wasm",
- "urlencoding",
- "utoipa",
- "utoipa-axum",
- "utoipa-swagger-ui",
- "utoipa-swagger-ui-vendored",
- "walkdir",
- "zen-engine",
- "zen-expression",
- "zip 8.6.0",
- "zstd",
-]
-
-[[package]]
 name = "ahash"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1313,7 +1258,7 @@ dependencies = [
  "cap-primitives",
  "cap-std",
  "io-lifetimes 3.0.1",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1330,7 +1275,7 @@ dependencies = [
  "maybe-owned",
  "rustix",
  "rustix-linux-procfs",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
  "winx",
 ]
 
@@ -2101,6 +2046,61 @@ dependencies = [
 ]
 
 [[package]]
+name = "donka-runtime"
+version = "1.28.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "aws-config",
+ "aws-sdk-s3",
+ "axum",
+ "axum-macros",
+ "axum-server",
+ "axum-tracing-opentelemetry",
+ "azure_core",
+ "azure_identity",
+ "azure_storage_blob",
+ "base64 0.23.1",
+ "chrono",
+ "config",
+ "dashmap",
+ "dotenvy",
+ "futures",
+ "gcloud-storage",
+ "itertools 0.15.0",
+ "mimalloc",
+ "opentelemetry",
+ "opentelemetry-appender-tracing",
+ "opentelemetry-otlp",
+ "opentelemetry-semantic-conventions",
+ "opentelemetry_sdk",
+ "rustls",
+ "serde",
+ "serde_json",
+ "strum 0.28.0",
+ "strum_macros 0.28.0",
+ "testcontainers",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tower-http 0.7.0",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+ "tsgo-wasm",
+ "urlencoding",
+ "utoipa",
+ "utoipa-axum",
+ "utoipa-swagger-ui",
+ "utoipa-swagger-ui-vendored",
+ "walkdir",
+ "zen-engine",
+ "zen-expression",
+ "zip 8.6.0",
+ "zstd",
+]
+
+[[package]]
 name = "dotenvy"
 version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2224,7 +2224,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3777,7 +3777,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4606,7 +4606,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5379,7 +5379,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5448,7 +5448,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5926,7 +5926,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5967,7 +5967,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6470,7 +6470,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7909,7 +7909,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8271,9 +8271,9 @@ dependencies = [
 
 [[package]]
 name = "zen-engine"
-version = "1.0.0-beta.12"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b42e892493f3f94f006016a762351ba787374c7e9e24910b92a205b8952b9c72"
+checksum = "2d496ee90df7dbdf57dc50f9a7151af59b02a94d2c14f7fe95ed47f84d9d0191"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
@@ -8314,9 +8314,9 @@ dependencies = [
 
 [[package]]
 name = "zen-expression"
-version = "1.0.0-beta.12"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aa87c8ca984fa8f8fbd70b79e06b10eb9c1e6d372e5e41e46efd732820d5232"
+checksum = "54ebfe9b20edcb22c243efd3486e6e4ad09683da9cd9f83d198d79a2f63c618c"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
@@ -8345,9 +8345,9 @@ dependencies = [
 
 [[package]]
 name = "zen-macros"
-version = "1.0.0-beta.12"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40898fbd04392fd53454ab4721537a46c871b3b51528dc1e9323d7db0e66c817"
+checksum = "d316b73632e248999b1dada562b3c2392df3559ddbc710a79dd287c82a596097"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8357,9 +8357,9 @@ dependencies = [
 
 [[package]]
 name = "zen-tmpl"
-version = "1.0.0-beta.12"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "630039a5e138a633e492f58d2d470aede30589753336dac36845e8e078f9dc94"
+checksum = "6a7c3198884e67e5bb09b26db57ddca98512930a30d54dc768b12f80f6651fa7"
 dependencies = [
  "serde",
  "serde_json",
@@ -8369,9 +8369,9 @@ dependencies = [
 
 [[package]]
 name = "zen-types"
-version = "1.0.0-beta.12"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "268b89744b581ef2e9df4c08adc0e03987dccf870086b8b72610265fd85ae602"
+checksum = "8853dc6a80505b7096dae2a171b8a6a22ccb34a251dcec5d54ded2ce1c892883"
 dependencies = [
  "ahash 0.8.12",
  "hipstr",

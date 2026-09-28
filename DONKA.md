@@ -18,3 +18,11 @@ regularly. The original license and copyright notice in `LICENSE` stay as they a
 | D5 | Rate limiting on evaluate routes |
 
 Changes are kept behind small extension points so upstream merges stay easy.
+
+## Names we keep on purpose
+
+- The Rust library is still called `agent` (only the package and binary are `donka-runtime`),
+  so every source file and test stays identical to upstream.
+- `x-gorules` in the generated OpenAPI documents and `application/vnd.gorules.decision` in
+  decision files are contracts read by API clients and written by the editor. Renaming them
+  would break compatibility; a Donka alias can be added later as an additive change.
