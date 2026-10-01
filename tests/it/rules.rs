@@ -408,3 +408,45 @@ async fn list_without_release_metadata_uses_fallbacks() {
     assert!(schema["properties"].get("meta").is_none());
     assert_eq!(schema["properties"]["trace"]["type"], json!("object"));
 }
+
+/// DNK-13: a v2 artifact deployed to production lists token hashes, never
+/// tokens, and only takes the tokens issued for production.
+#[tokio::test]
+async fn hashed_tokens_open_only_their_own_environment() {
+    let router = rules_router().await;
+    let evaluate = |token: Option<&'static str>| {
+        evaluate_request(
+            "/api/rules/hashed-project/evaluate/plain-rule",
+            token,
+            json!({ "context": { "hello": "world" } }),
+        )
+    };
+
+    let (status, _, body) = send(&router, evaluate(Some("prod-token"))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["result"]["hello"], json!("world"));
+
+    for refused in [
+        Some("staging-token"),
+        Some("be1d3e6282ba3ede34284903787758d04a2e9b84521f98f0a0657e405c6650ec"),
+        Some("wrong-token"),
+        None,
+    ] {
+        let (status, _, body) = send(&router, evaluate(refused)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{refused:?}");
+        assert_eq!(body["code"], json!("unauthorized"));
+    }
+
+    let (status, _, _) = send(
+        &router,
+        list_request("/api/rules/hashed-project", Some("staging-token")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _, _) = send(
+        &router,
+        list_request("/api/rules/hashed-project", Some("prod-token")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}

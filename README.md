@@ -57,6 +57,19 @@ PROVIDER__PREFIX=folder/
 AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
 ```
+## Access tokens
+
+Evaluate and rules requests send the token in the `X-Access-Token` header. A release artifact
+lists the tokens it accepts in `.config/project.json`:
+
+- `accessTokenHashes` (format version 2, written by Donka Studio): the lowercase hex SHA-256 of
+  each token, with the environment it was issued for. Tokens never appear in the artifact. An
+  artifact deployed to an environment (`environment.key`) only accepts that environment's
+  tokens, so a staging token is refused by production.
+- `accessTokens` (version 1): plain tokens, still accepted so older artifacts keep working.
+
+The artifact format is documented in Studio: `youmssi/donka`, `docs/artifact-format.md`.
+
 ## Rules OpenAPI
 
 `GET /api/rules/{project}` returns an OpenAPI 3 document describing the

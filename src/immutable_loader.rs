@@ -57,7 +57,7 @@ impl ImmutableLoader {
 
     pub fn can_access(&self, token: &str) -> bool {
         self.release_data()
-            .map(|rd| rd.access_tokens.iter().any(|at| at.deref().eq(token)))
+            .map(|rd| rd.grants(token))
             .unwrap_or(true)
     }
 

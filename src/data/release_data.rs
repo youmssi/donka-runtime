@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use crate::data::access::{AccessTokenHash, lenient_hashes};
+
 /// `.config/project.json` as shipped by BRMS `deployReleaseToEnv`.
 ///
 /// Parsing is deliberately lenient: BRMS writes explicit `null`s
@@ -16,6 +18,9 @@ pub struct ReleaseData {
     pub project: Option<ReleaseDataProject>,
     #[serde(default)]
     pub access_tokens: Vec<Arc<str>>,
+    /// Donka: hashes of the tokens issued for this environment (DNK-13).
+    #[serde(default, deserialize_with = "lenient_hashes")]
+    pub access_token_hashes: Vec<AccessTokenHash>,
     pub release: Option<ReleaseDataRelease>,
     pub environment: Option<ReleaseDataEnvironment>,
 }

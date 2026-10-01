@@ -12,7 +12,7 @@ regularly. The original license and copyright notice in `LICENSE` stay as they a
 | Item | Change |
 |---|---|
 | D1 | Rebrand; upgrade zen-engine to 2.0.1 (same pin as Studio, enforced by Studio's drift check) |
-| D2 | Hashed, per-environment access tokens in `.config/project.json` |
+| D2 | Hashed, per-environment access tokens in `.config/project.json` (done, DNK-13: `src/data/access.rs`) |
 | D3 | Connector handler (custom-node adapter) with secrets from env/vault, timeouts, retries |
 | D4 | Decision-log emitter: ships input, output, release and trace to Studio asynchronously |
 | D5 | Rate limiting on evaluate routes |
