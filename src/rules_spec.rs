@@ -319,6 +319,7 @@ mod tests {
                 name: None,
             }),
             access_tokens: vec![Arc::from("secret-token")],
+            access_token_hashes: Vec::new(),
             release: Some(ReleaseDataRelease {
                 id: Some(Arc::from("22222222-2222-2222-2222-222222222222")),
                 version: Some(Arc::from("1.2.3")),
