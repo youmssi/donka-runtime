@@ -1,0 +1,24 @@
+[package]
+name = "donka-connectors"
+description = "Connector nodes for Donka decisions: outbound HTTP JSON calls with timeouts, retries and a circuit breaker, or mock responses for simulation"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[features]
+# Real HTTP calls (the Runtime). Without it only mock mode exists (Studio's simulator).
+live = ["dep:reqwest", "dep:tokio"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+zen-engine = { version = "=2.0.1", features = ["arbitrary_precision"] }
+zen-tmpl = { version = "=2.0.1", features = ["arbitrary_precision"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+tokio = { version = "1", features = ["time"], optional = true }
+
+[dev-dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }

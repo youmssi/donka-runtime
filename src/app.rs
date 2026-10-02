@@ -22,6 +22,7 @@ pub async fn create_agent(
     config: EnvironmentConfig,
     global_config: Arc<GlobalAgentConfig>,
 ) -> Agent {
+    crate::connectors::init(&config.connectors);
     match Agent::new(config, global_config).await {
         Ok(agent) => agent,
         Err(error) => {

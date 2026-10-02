@@ -40,7 +40,9 @@ impl ImmutableLoader {
     }
 
     pub fn into_engine(self) -> DecisionEngine {
-        DecisionEngine::default().with_loader(Arc::new(self))
+        DecisionEngine::default()
+            .with_loader(Arc::new(self))
+            .with_adapter(crate::connectors::adapter())
     }
 
     pub fn release_data(&self) -> Option<&ReleaseData> {

@@ -8,6 +8,8 @@ WORKDIR /app
 ENV TSGO_CWASM_CACHE=/app/.tsgo-cache
 
 COPY Cargo.toml Cargo.lock build.rs ./
+# Workspace members are small and rarely change; the layer depends on them too.
+COPY crates crates
 RUN mkdir src \
     && echo 'fn main() {}' > src/main.rs \
     && touch src/lib.rs \

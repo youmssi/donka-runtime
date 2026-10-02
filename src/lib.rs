@@ -1,5 +1,6 @@
 pub mod app;
 pub mod config;
+mod connectors;
 mod data;
 mod engine_ext;
 mod immutable_loader;
