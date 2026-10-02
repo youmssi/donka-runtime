@@ -1,4 +1,5 @@
 use crate::Agent;
+use crate::decision_log;
 use crate::engine_ext::EngineExtension;
 use anyhow::{Context, anyhow};
 use axum::extract::Path;
@@ -53,7 +54,7 @@ pub async fn evaluate(
     Extension(agent): Extension<Agent>,
     Path((project, key)): Path<(Arc<str>, Arc<str>)>,
     Json(payload): Json<EvaluateRequest>,
-) -> Result<Json<EvaluateResponse>, EvaluateError> {
+) -> Result<Response, EvaluateError> {
     let span = Span::current();
 
     span.set_attribute("params.project", project.clone());
@@ -92,6 +93,18 @@ pub async fn evaluate(
         return Err(error.into());
     }
 
+    let reference = decision_log::reference(&headers)
+        .map_err(|error| EvaluateError::from(anyhow::Error::new(error)))?;
+    let logged = decision_log::begin(
+        project_data.engine.release_data().as_ref(),
+        &key,
+        reference,
+        &payload.context,
+    );
+    let wants_trace = payload.trace.unwrap_or(false);
+    // The decision log keeps the trace for replay.
+    let trace = wants_trace || logged.is_some();
+
     let cloned_project_data = project_data.clone();
     let cloned_key = key.clone();
     let result = local_pool
@@ -102,44 +115,70 @@ pub async fn evaluate(
                     &cloned_key,
                     payload.context.into(),
                     EvaluationOptions {
-                        trace: payload.trace.unwrap_or(false),
+                        trace,
                         max_depth: 10,
                     },
                 )
                 .await
                 .map(|s| serde_json::to_value(s).context("Failed to serialize value"))
-                .map_err(|e| anyhow::Error::msg(e.to_string()))
+                .map_err(|e| {
+                    (
+                        anyhow::Error::msg(e.to_string()),
+                        decision_log::error_trace(&e),
+                    )
+                })
         })
         .await
         .expect("Thread failed to join");
     let result = match result {
         Ok(result) => result,
-        Err(error) => {
+        Err((error, trace)) => {
             tracing::error!(error = debug(&error), "Failed to evaluate decision model");
-            return Err(error.into());
+            return Ok(failed(logged, error.into(), trace));
         }
     };
 
-    let result = match result {
+    let mut result = match result {
         Ok(result) => result,
         Err(error) => {
             tracing::error!(error = debug(&error), "Failed to serialize the response.");
-            return Err(error.into());
+            return Ok(failed(logged, error.into(), None));
         }
     };
+    let decision_id = logged.map(|logged| logged.succeeded(&mut result, wants_trace));
 
     let release_data = project_data.engine.release_data();
 
     let release_id = release_data.and_then(|r| r.release_id().cloned());
     let version_id = project_data.engine.get_version(&key);
 
-    Ok(Json(EvaluateResponse {
+    let mut response = Json(EvaluateResponse {
         graph_response: result,
         details: EvaluateDetailsResponse {
             version_id,
             release_id,
         },
-    }))
+    })
+    .into_response();
+    if let Some((name, value)) = decision_id {
+        response.headers_mut().insert(name, value);
+    }
+    Ok(response)
+}
+
+/// The error answer, with the decision log's record of it.
+fn failed(
+    logged: Option<decision_log::Pending>,
+    error: EvaluateError,
+    trace: Option<Value>,
+) -> Response {
+    let (status, body) = error.parts();
+    let decision_id = logged.map(|logged| logged.failed(&body, trace));
+    let mut response = (status, Json(body)).into_response();
+    if let Some((name, value)) = decision_id {
+        response.headers_mut().insert(name, value);
+    }
+    response
 }
 
 pub enum EvaluateError {
@@ -147,20 +186,24 @@ pub enum EvaluateError {
     Anyhow((StatusCode, anyhow::Error)),
 }
 
-impl IntoResponse for EvaluateError {
-    fn into_response(self) -> Response {
+impl EvaluateError {
+    fn parts(self) -> (StatusCode, Value) {
         match self {
             EvaluateError::EngineError(error) => (
                 StatusCode::BAD_REQUEST,
-                Json(serde_json::to_value(&error).unwrap_or_default()),
-            )
-                .into_response(),
-            EvaluateError::Anyhow((status, error)) => (
-                status,
-                Json(serde_json::json!({ "message": error.to_string() })),
-            )
-                .into_response(),
+                serde_json::to_value(&error).unwrap_or_default(),
+            ),
+            EvaluateError::Anyhow((status, error)) => {
+                (status, serde_json::json!({ "message": error.to_string() }))
+            }
         }
+    }
+}
+
+impl IntoResponse for EvaluateError {
+    fn into_response(self) -> Response {
+        let (status, body) = self.parts();
+        (status, Json(body)).into_response()
     }
 }
 

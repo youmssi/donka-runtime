@@ -37,7 +37,7 @@ azure_storage_blob = "1.0"
 azure_identity = "1.0"
 base64 = "0.23"
 config = "0.15"
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 dashmap = "6.2"
 dotenvy = "0.15"
 futures = { version = "0.3" }
@@ -64,6 +64,10 @@ tsgo-wasm = "0.3"
 mimalloc = { version = "*" }
 zen-engine = { version = "=2.0.1", features = ["arbitrary_precision"] }
 donka-connectors = { path = "crates/connectors", features = ["live"] }
+# Decision-log feed to Studio (DNK-18).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
 zen-expression = { version = "=2.0.1", features = ["arbitrary_precision"] }
 zip = { version = "8.6", default-features = false, features = [
     "aes-crypto",

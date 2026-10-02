@@ -1,9 +1,10 @@
 use agent::config::{EnvironmentConfig, GlobalAgentConfig};
-use agent::{app, telemetry};
+use agent::{app, decision_log, telemetry};
 use config::{Config, Environment};
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -50,16 +51,23 @@ async fn main() {
     let listener_address =
         SocketAddr::from_str(listener_address_str).expect("Valid socket address");
 
+    // Donka: on SIGTERM or Ctrl-C, finish the requests in flight, then send the
+    // decision records still queued.
+    let handle = axum_server::Handle::new();
+    tokio::spawn(stop_on_signal(handle.clone()));
+
     let server_result = match rustls_config {
         None => {
             tracing::info!("🚀 Listening on http://{listener_address}");
             axum_server::bind(listener_address)
+                .handle(handle)
                 .serve(app.into_make_service())
                 .await
         }
         Some(rustls_config) => {
             tracing::info!("🚀 Listening on https://{listener_address}");
             axum_server::bind_rustls(listener_address, rustls_config)
+                .handle(handle)
                 .serve(app.into_make_service())
                 .await
         }
@@ -68,4 +76,29 @@ async fn main() {
     if let Err(error) = server_result {
         tracing::error!("Server exited with an error: {error:?}");
     }
+    decision_log::shutdown().await;
+}
+
+async fn stop_on_signal(handle: axum_server::Handle<SocketAddr>) {
+    let ctrl_c = tokio::signal::ctrl_c();
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(error) => {
+                tracing::error!("Cannot listen for SIGTERM: {error}");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = ctrl_c => {}
+        () = terminate => {}
+    }
+    tracing::info!("Stopping: finishing requests in flight");
+    handle.graceful_shutdown(Some(Duration::from_secs(10)));
 }

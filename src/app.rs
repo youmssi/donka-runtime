@@ -23,6 +23,10 @@ pub async fn create_agent(
     global_config: Arc<GlobalAgentConfig>,
 ) -> Agent {
     crate::connectors::init(&config.connectors);
+    if let Err(error) = crate::decision_log::init(&config.decision_log) {
+        tracing::error!("Invalid decision log settings: {error:#}");
+        panic!("Invalid decision log settings");
+    }
     match Agent::new(config, global_config).await {
         Ok(agent) => agent,
         Err(error) => {

@@ -34,6 +34,9 @@ pub struct EnvironmentConfig {
 
     #[serde(default)]
     pub connectors: ConnectorsConfig,
+
+    #[serde(default)]
+    pub decision_log: DecisionLogConfig,
 }
 
 fn default_refresh_interval() -> Duration {
@@ -161,6 +164,108 @@ impl Default for ConnectorsConfig {
     }
 }
 
+/// Where the Runtime sends a record of every evaluation (Donka Studio's
+/// decision log). Off unless both `url` and `token` are set.
+#[derive(Clone, Deserialize)]
+pub struct DecisionLogConfig {
+    /// Studio's feed endpoint, e.g. `https://studio.example/api/v1/decision-log/records`.
+    #[serde(default)]
+    pub url: Option<String>,
+
+    /// The decision-log token Studio issued for this Runtime's environment.
+    #[serde(default)]
+    pub token: Option<String>,
+
+    /// Records sent together, at most.
+    #[serde(default = "default_decision_log_batch_size")]
+    pub batch_size: usize,
+
+    /// Bytes of records sent together, at most (a record larger than this goes alone).
+    #[serde(default = "default_decision_log_batch_bytes")]
+    pub batch_bytes: usize,
+
+    /// How long a record waits for others before its batch is sent.
+    #[serde(
+        deserialize_with = "deserialize_millis",
+        default = "default_decision_log_flush_interval"
+    )]
+    pub flush_interval: Duration,
+
+    /// Records held while Studio cannot be reached; beyond this, new records are dropped
+    /// (and counted in the logs) rather than slowing evaluations down.
+    #[serde(default = "default_decision_log_queue_capacity")]
+    pub queue_capacity: usize,
+
+    /// Time allowed for one send.
+    #[serde(
+        deserialize_with = "deserialize_millis",
+        default = "default_decision_log_timeout"
+    )]
+    pub timeout: Duration,
+
+    /// Time allowed, when the Runtime stops, to send what is still queued.
+    #[serde(
+        deserialize_with = "deserialize_millis",
+        default = "default_decision_log_shutdown_timeout"
+    )]
+    pub shutdown_timeout: Duration,
+}
+
+// The token never reaches a log line.
+impl std::fmt::Debug for DecisionLogConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DecisionLogConfig")
+            .field("url", &self.url)
+            .field("token", &self.token.as_ref().map(|_| "<set>"))
+            .field("batch_size", &self.batch_size)
+            .field("batch_bytes", &self.batch_bytes)
+            .field("flush_interval", &self.flush_interval)
+            .field("queue_capacity", &self.queue_capacity)
+            .field("timeout", &self.timeout)
+            .field("shutdown_timeout", &self.shutdown_timeout)
+            .finish()
+    }
+}
+
+fn default_decision_log_batch_size() -> usize {
+    100
+}
+
+fn default_decision_log_batch_bytes() -> usize {
+    4 << 20
+}
+
+fn default_decision_log_flush_interval() -> Duration {
+    Duration::from_millis(1_000)
+}
+
+fn default_decision_log_queue_capacity() -> usize {
+    10_000
+}
+
+fn default_decision_log_timeout() -> Duration {
+    Duration::from_millis(10_000)
+}
+
+fn default_decision_log_shutdown_timeout() -> Duration {
+    Duration::from_millis(10_000)
+}
+
+impl Default for DecisionLogConfig {
+    fn default() -> Self {
+        Self {
+            url: None,
+            token: None,
+            batch_size: default_decision_log_batch_size(),
+            batch_bytes: default_decision_log_batch_bytes(),
+            flush_interval: default_decision_log_flush_interval(),
+            queue_capacity: default_decision_log_queue_capacity(),
+            timeout: default_decision_log_timeout(),
+            shutdown_timeout: default_decision_log_shutdown_timeout(),
+        }
+    }
+}
+
 impl Default for EnvironmentConfig {
     fn default() -> Self {
         Self {
@@ -172,6 +277,7 @@ impl Default for EnvironmentConfig {
             http_ssl: None,
             tsgo: TsgoConfig::default(),
             connectors: ConnectorsConfig::default(),
+            decision_log: DecisionLogConfig::default(),
         }
     }
 }
@@ -352,5 +458,39 @@ mod tests {
 
         assert!(!config.tsgo.enabled);
         assert_eq!(config.tsgo.timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn decision_log_is_off_by_default() {
+        let config = parse(&[]);
+
+        assert!(config.decision_log.url.is_none());
+        assert!(config.decision_log.token.is_none());
+        assert_eq!(config.decision_log.batch_size, 100);
+    }
+
+    #[test]
+    fn decision_log_reads_the_documented_env_vars() {
+        let config = parse(&[
+            (
+                "DECISION_LOG__URL",
+                "https://studio.example/api/v1/decision-log/records",
+            ),
+            ("DECISION_LOG__TOKEN", "dnk_log_secret"),
+            ("DECISION_LOG__BATCH_SIZE", "20"),
+            ("DECISION_LOG__FLUSH_INTERVAL", "250"),
+            ("DECISION_LOG__QUEUE_CAPACITY", "500"),
+        ]);
+
+        let log = config.decision_log;
+        assert_eq!(
+            log.url.as_deref(),
+            Some("https://studio.example/api/v1/decision-log/records")
+        );
+        assert_eq!(log.token.as_deref(), Some("dnk_log_secret"));
+        assert_eq!(log.batch_size, 20);
+        assert_eq!(log.flush_interval, Duration::from_millis(250));
+        assert_eq!(log.queue_capacity, 500);
+        assert!(!format!("{log:?}").contains("dnk_log_secret"));
     }
 }
