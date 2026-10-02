@@ -2,6 +2,7 @@ pub mod app;
 pub mod config;
 mod connectors;
 mod data;
+pub mod decision_log;
 mod engine_ext;
 mod immutable_loader;
 mod provider;

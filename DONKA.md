@@ -14,7 +14,7 @@ regularly. The original license and copyright notice in `LICENSE` stay as they a
 | D1 | Rebrand; upgrade zen-engine to 2.0.1 (same pin as Studio, enforced by Studio's drift check) |
 | D2 | Hashed, per-environment access tokens in `.config/project.json` (done, DNK-13: `src/data/access.rs`) |
 | D3 | Connector handler (custom-node adapter) with secrets from env, timeouts, retries, circuit breaker (done, DNK-17: `crates/connectors`, wired in `src/connectors.rs`) |
-| D4 | Decision-log emitter: ships input, output, release and trace to Studio asynchronously |
+| D4 | Decision-log emitter: ships input, output, release and trace to Studio asynchronously (done, DNK-18: `src/decision_log.rs`; graceful stop in `src/main.rs`) |
 | D5 | Rate limiting on evaluate routes |
 
 Changes are kept behind small extension points so upstream merges stay easy.

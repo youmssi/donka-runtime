@@ -8,15 +8,19 @@
 //! authenticates the call, and what to do when the call fails: fail the
 //! decision, or continue with the `fallback` the author defined.
 //!
-//! The same handler runs in two modes. [`ConnectorAdapter::mock`] answers
+//! The same handler runs in three modes. [`ConnectorAdapter::mock`] answers
 //! with the node's `mock` response and never leaves the process: it is what
-//! Studio's simulator uses. [`ConnectorAdapter::live`] (feature `live`, the
-//! Runtime) makes the call with a timeout, bounded retries and a circuit
-//! breaker per URL, and reads secret values from its [`Secrets`]. No secret
-//! value ever appears in a node's output, trace or error.
+//! Studio's simulator uses. [`ConnectorAdapter::replay`] answers with what
+//! the service answered when a logged decision was made, so Studio can
+//! re-evaluate it without calling anyone. [`ConnectorAdapter::live`]
+//! (feature `live`, the Runtime) makes the call with a timeout, bounded
+//! retries and a circuit breaker per URL, and reads secret values from its
+//! [`Secrets`]. No secret value ever appears in a node's output, trace or
+//! error.
 
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
+use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -110,6 +114,8 @@ pub enum ConnectorError {
     Template(String),
     #[error("no mock response: add one to the connector node to simulate it")]
     NoMock,
+    #[error("the logged decision holds no answer from this connector")]
+    NotRecorded,
     #[error("secret {0} is not configured on the Runtime")]
     MissingSecret(String),
     #[error("the service did not answer within {0} ms")]
@@ -131,6 +137,7 @@ impl ConnectorError {
             ConnectorError::InvalidConfig(_) => "invalid_config",
             ConnectorError::Template(_) => "template",
             ConnectorError::NoMock => "no_mock",
+            ConnectorError::NotRecorded => "not_recorded",
             ConnectorError::MissingSecret(_) => "missing_secret",
             ConnectorError::Timeout(_) => "timeout",
             ConnectorError::Unreachable => "unreachable",
@@ -151,6 +158,8 @@ pub struct CallReport {
 
 enum Mode {
     Mock,
+    /// Each connector node's output when the decision was made, by node id.
+    Replay(HashMap<String, Value>),
     #[cfg(feature = "live")]
     Live(live::Live),
 }
@@ -162,13 +171,8 @@ pub struct ConnectorAdapter {
 
 impl fmt::Debug for ConnectorAdapter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mode = match self.mode {
-            Mode::Mock => "mock",
-            #[cfg(feature = "live")]
-            Mode::Live(_) => "live",
-        };
         f.debug_struct("ConnectorAdapter")
-            .field("mode", &mode)
+            .field("mode", &self.mode_name())
             .finish()
     }
 }
@@ -177,6 +181,24 @@ impl ConnectorAdapter {
     /// Answers with each node's `mock` response; nothing leaves the process.
     pub fn mock() -> Self {
         Self { mode: Mode::Mock }
+    }
+
+    /// Answers with what each connector answered when a logged decision was
+    /// made: `outputs` maps node ids to the node's output in that decision's
+    /// trace. Nothing leaves the process.
+    pub fn replay(outputs: HashMap<String, Value>) -> Self {
+        Self {
+            mode: Mode::Replay(outputs),
+        }
+    }
+
+    fn mode_name(&self) -> &'static str {
+        match self.mode {
+            Mode::Mock => "mock",
+            Mode::Replay(_) => "replay",
+            #[cfg(feature = "live")]
+            Mode::Live(_) => "live",
+        }
     }
 
     /// Calls the services for real, within `limits`, with secret values from `secrets`.
@@ -211,17 +233,21 @@ impl ConnectorAdapter {
                 config.mock.clone().ok_or(ConnectorError::NoMock),
                 CallReport::default(),
             ),
+            Mode::Replay(outputs) => (
+                outputs
+                    .get(node_id.as_ref())
+                    .and_then(|output| output.get(&config.output_key))
+                    .cloned()
+                    .ok_or(ConnectorError::NotRecorded),
+                CallReport::default(),
+            ),
             #[cfg(feature = "live")]
             Mode::Live(live) => match render(&config.body, &request.input) {
                 Ok(body) => live.call(&config, body).await,
                 Err(error) => (Err(error), CallReport::default()),
             },
         };
-        let mode = match self.mode {
-            Mode::Mock => "mock",
-            #[cfg(feature = "live")]
-            Mode::Live(_) => "live",
-        };
+        let mode = self.mode_name();
         match result {
             Ok(response) => Ok(NodeResponse {
                 output: Variable::from(with_output(input, &config.output_key, response)),
@@ -254,6 +280,17 @@ impl CustomNodeAdapter for ConnectorAdapter {
     fn handle(&self, request: CustomNodeRequest) -> Pin<Box<dyn Future<Output = NodeResult> + '_>> {
         Box::pin(self.respond(request))
     }
+}
+
+/// Each node's output in a decision's serialized trace (`{ "<node id>":
+/// { "output": … } }`), the answers [`ConnectorAdapter::replay`] takes.
+pub fn recorded_outputs(trace: &Value) -> HashMap<String, Value> {
+    trace
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(id, node)| Some((id.clone(), node.get("output")?.clone())))
+        .collect()
 }
 
 /// A node's settings, checked: the URL is http(s), names are valid, and the
@@ -310,7 +347,10 @@ pub fn valid_secret_name(name: &str) -> bool {
 fn fallback_allowed(error: &ConnectorError) -> bool {
     !matches!(
         error,
-        ConnectorError::InvalidConfig(_) | ConnectorError::Template(_) | ConnectorError::NoMock
+        ConnectorError::InvalidConfig(_)
+            | ConnectorError::Template(_)
+            | ConnectorError::NoMock
+            | ConnectorError::NotRecorded
     )
 }
 

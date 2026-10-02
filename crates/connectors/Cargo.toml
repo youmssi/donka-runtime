@@ -1,6 +1,6 @@
 [package]
 name = "donka-connectors"
-description = "Connector nodes for Donka decisions: outbound HTTP JSON calls with timeouts, retries and a circuit breaker, or mock responses for simulation"
+description = "Connector nodes for Donka decisions: outbound HTTP JSON calls with timeouts, retries and a circuit breaker, or mock and recorded responses for simulation and replay"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"

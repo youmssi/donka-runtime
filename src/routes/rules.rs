@@ -1,4 +1,5 @@
 use crate::data::evaluation_meta::EvaluationMeta;
+use crate::decision_log;
 use crate::engine_ext::EngineExtension;
 use crate::rules_spec::{RulesDocumentSource, build_rules_openapi};
 use crate::{Agent, Project};
@@ -144,6 +145,13 @@ pub async fn rules_evaluate(
         }
     }
 
+    let reference = decision_log::reference(&headers)
+        .map_err(|_| RulesApiError::new(StatusCode::BAD_REQUEST, "reference.invalid"))?;
+    let logged = decision_log::begin(release_data.as_ref(), &key, reference, &payload.context);
+    let wants_trace = payload.trace.unwrap_or(false);
+    // The decision log keeps the trace for replay.
+    let trace = wants_trace || logged.is_some();
+
     let cloned_project_data = project_data.clone();
     let cloned_key = key.clone();
     // EvaluationError is not Send — classify and serialize it inside the
@@ -156,15 +164,24 @@ pub async fn rules_evaluate(
                     &cloned_key,
                     payload.context.into(),
                     EvaluationOptions {
-                        trace: payload.trace.unwrap_or(false),
+                        trace,
                         max_depth: 10,
                     },
                 )
                 .await
-                .map_err(|error| RulesApiError::from_engine_error(error.as_ref()))
+                .map_err(|error| {
+                    (
+                        RulesApiError::from_engine_error(error.as_ref()),
+                        decision_log::error_trace(&error),
+                    )
+                })
                 .and_then(|response| {
-                    serde_json::to_value(response)
-                        .map_err(|_| RulesApiError::new(StatusCode::BAD_REQUEST, "evaluate.failed"))
+                    serde_json::to_value(response).map_err(|_| {
+                        (
+                            RulesApiError::new(StatusCode::BAD_REQUEST, "evaluate.failed"),
+                            None,
+                        )
+                    })
                 })
         })
         .await
@@ -172,11 +189,17 @@ pub async fn rules_evaluate(
 
     let mut body = match result {
         Ok(body) => body,
-        Err(error) => {
+        Err((error, trace)) => {
             tracing::error!(error = ?error.body, "Failed to evaluate decision model");
-            return Err(error);
+            let decision_id = logged.map(|logged| logged.failed(&error.body, trace));
+            let mut response = error.into_response();
+            if let Some((name, value)) = decision_id {
+                response.headers_mut().insert(name, value);
+            }
+            return Ok(response);
         }
     };
+    let decision_id = logged.map(|logged| logged.succeeded(&mut body, wants_trace));
 
     // BRMS parity: `Object.assign(result.data, { meta })` — meta rides on
     // 200s only.
@@ -192,6 +215,9 @@ pub async fn rules_evaluate(
         && let Ok(header_value) = HeaderValue::from_str(release_id)
     {
         response.headers_mut().insert("X-Release-Id", header_value);
+    }
+    if let Some((name, value)) = decision_id {
+        response.headers_mut().insert(name, value);
     }
 
     Ok(response)

@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 use std::sync::Arc;
 use zen_engine::DecisionEngine;
 use zen_engine::model::DecisionContent;
@@ -158,6 +159,92 @@ async fn the_engine_runs_connector_nodes_through_the_adapter() {
     );
 }
 
+#[tokio::test]
+async fn replay_answers_with_the_recorded_output() {
+    let recorded = HashMap::from([(
+        "bureau".to_owned(),
+        json!({ "applicant": { "id": "A1" }, "bureau": { "score": 640 } }),
+    )]);
+    let response = ConnectorAdapter::replay(recorded)
+        .handle(request(
+            mock_config(),
+            json!({ "applicant": { "id": "A1" } }),
+        ))
+        .await
+        .expect("replayed");
+    assert_eq!(
+        response.output.to_value()["bureau"],
+        json!({ "score": 640 })
+    );
+    assert_eq!(
+        response.trace_data.expect("trace").to_value(),
+        json!({ "mode": "replay", "outcome": "ok" })
+    );
+}
+
+#[tokio::test]
+async fn replay_without_a_recording_fails_even_with_a_fallback() {
+    let mut config = mock_config();
+    config["onError"] = json!("fallback");
+    config["fallback"] = json!({ "score": 0 });
+    let error = ConnectorAdapter::replay(HashMap::new())
+        .handle(request(config, json!({})))
+        .await
+        .expect_err("nothing recorded");
+    assert_eq!(
+        error.trace.expect("trace").to_value()["error"]["code"],
+        json!("not_recorded")
+    );
+}
+
+#[tokio::test]
+async fn a_traced_decision_replays_to_the_same_result_whatever_the_mock() {
+    let graph = |mock: Value| -> DecisionContent {
+        let mut config = mock_config();
+        config["mock"] = mock;
+        serde_json::from_value(json!({
+            "nodes": [
+                { "id": "in", "name": "Request", "type": "inputNode", "position": { "x": 0, "y": 0 } },
+                {
+                    "id": "bureau", "name": "Bureau", "type": "customNode", "position": { "x": 0, "y": 0 },
+                    "content": { "kind": KIND, "config": config }
+                },
+                { "id": "out", "name": "Response", "type": "outputNode", "position": { "x": 0, "y": 0 } }
+            ],
+            "edges": [
+                { "id": "e1", "type": "edge", "sourceId": "in", "targetId": "bureau" },
+                { "id": "e2", "type": "edge", "sourceId": "bureau", "targetId": "out" }
+            ]
+        }))
+        .expect("graph")
+    };
+    let input = || Variable::from(json!({ "applicant": { "id": "A1" } }));
+    let options = zen_engine::EvaluationOptions {
+        trace: true,
+        max_depth: 10,
+    };
+
+    // The decision as it was made: the "service" answered 712.
+    let made = DecisionEngine::default()
+        .with_adapter(Arc::new(ConnectorAdapter::mock()))
+        .create_decision(Arc::new(graph(json!({ "score": 712 }))))
+        .expect("decision")
+        .evaluate_with_opts(input(), options)
+        .await
+        .expect("evaluated");
+    let trace = serde_json::to_value(made.trace.expect("trace")).expect("trace json");
+
+    // Replayed where the service would now answer 1: the recording wins.
+    let replayed = DecisionEngine::default()
+        .with_adapter(Arc::new(ConnectorAdapter::replay(recorded_outputs(&trace))))
+        .create_decision(Arc::new(graph(json!({ "score": 1 }))))
+        .expect("decision")
+        .evaluate_with_opts(input(), options)
+        .await
+        .expect("replayed");
+    assert_eq!(replayed.result.to_value(), made.result.to_value());
+}
+
 #[cfg(feature = "live")]
 mod live {
     use super::*;
@@ -166,7 +253,6 @@ mod live {
     use axum::response::IntoResponse;
     use axum::routing::post;
     use axum::{Json, Router};
-    use std::collections::HashMap;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;

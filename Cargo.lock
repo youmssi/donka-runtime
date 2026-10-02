@@ -2089,6 +2089,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
+ "reqwest 0.12.28",
  "rustls",
  "serde",
  "serde_json",
@@ -2096,6 +2097,7 @@ dependencies = [
  "strum 0.28.0",
  "strum_macros 0.28.0",
  "testcontainers",
+ "thiserror 2.0.20",
  "tokio",
  "tokio-util",
  "tower",
@@ -2109,6 +2111,7 @@ dependencies = [
  "utoipa-axum",
  "utoipa-swagger-ui",
  "utoipa-swagger-ui-vendored",
+ "uuid",
  "walkdir",
  "zen-engine",
  "zen-expression",
@@ -7300,6 +7303,7 @@ checksum = "2cefc03fd367c0c6d4305de1b312cf00248c4114f4a0418ce6a6af769e3b0bd9"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 
