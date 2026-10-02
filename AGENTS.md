@@ -60,10 +60,12 @@ conventional technical ones and say what you chose.
 ## 5. Checks before every push
 
 ```bash
-cargo fmt --check
+cargo fmt --all --check
 cargo clippy --all-targets        # no NEW warnings in code you changed (upstream code has
                                   # existing lints that we do not rewrite, see §3.4)
 cargo test                        # tests/it needs Docker (MinIO, Azurite containers)
+cargo clippy -p donka-connectors --all-targets -- -D warnings   # mock-only build, as Studio uses it
+cargo test -p donka-connectors
 ```
 
 Offline or proxied builds: `TSGO_WASM_FILE=/path/tsgo.wasm.zst` and
@@ -97,6 +99,7 @@ src/provider/               artifact sources: s3, azure_storage, gcs, filesystem
 src/data/                   artifact model (.config/project.json)
 src/immutable_loader.rs     in-memory release loader
 src/tsgo.rs, spec_derive.rs  TypeScript-based type derivation for OpenAPI
+crates/connectors/          connector nodes (MIT crate shared with Studio); src/connectors.rs wires it
 tests/it/                   integration tests (containers)
 DONKA.md                    what this fork changes and why
 ```

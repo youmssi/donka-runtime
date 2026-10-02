@@ -31,6 +31,9 @@ pub struct EnvironmentConfig {
 
     #[serde(default)]
     pub tsgo: TsgoConfig,
+
+    #[serde(default)]
+    pub connectors: ConnectorsConfig,
 }
 
 fn default_refresh_interval() -> Duration {
@@ -87,6 +90,77 @@ impl Default for TsgoConfig {
     }
 }
 
+/// What connector nodes may do when a decision calls an outside service. A
+/// node may ask for less time or fewer retries, never more than the maximums.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConnectorsConfig {
+    #[serde(
+        deserialize_with = "deserialize_millis",
+        default = "default_connector_timeout"
+    )]
+    pub timeout: Duration,
+
+    #[serde(
+        deserialize_with = "deserialize_millis",
+        default = "default_connector_max_timeout"
+    )]
+    pub max_timeout: Duration,
+
+    #[serde(default = "default_connector_retries")]
+    pub retries: u32,
+
+    #[serde(default = "default_connector_max_retries")]
+    pub max_retries: u32,
+
+    /// Consecutive failed calls to one URL that pause calls to it…
+    #[serde(default = "default_connector_breaker_failures")]
+    pub breaker_failures: u32,
+
+    /// …for this long.
+    #[serde(
+        deserialize_with = "deserialize_millis",
+        default = "default_connector_breaker_cooldown"
+    )]
+    pub breaker_cooldown: Duration,
+}
+
+fn default_connector_timeout() -> Duration {
+    Duration::from_millis(3_000)
+}
+
+fn default_connector_max_timeout() -> Duration {
+    Duration::from_millis(10_000)
+}
+
+fn default_connector_retries() -> u32 {
+    1
+}
+
+fn default_connector_max_retries() -> u32 {
+    3
+}
+
+fn default_connector_breaker_failures() -> u32 {
+    5
+}
+
+fn default_connector_breaker_cooldown() -> Duration {
+    Duration::from_millis(30_000)
+}
+
+impl Default for ConnectorsConfig {
+    fn default() -> Self {
+        Self {
+            timeout: default_connector_timeout(),
+            max_timeout: default_connector_max_timeout(),
+            retries: default_connector_retries(),
+            max_retries: default_connector_max_retries(),
+            breaker_failures: default_connector_breaker_failures(),
+            breaker_cooldown: default_connector_breaker_cooldown(),
+        }
+    }
+}
+
 impl Default for EnvironmentConfig {
     fn default() -> Self {
         Self {
@@ -97,6 +171,7 @@ impl Default for EnvironmentConfig {
             otel_enabled: false,
             http_ssl: None,
             tsgo: TsgoConfig::default(),
+            connectors: ConnectorsConfig::default(),
         }
     }
 }

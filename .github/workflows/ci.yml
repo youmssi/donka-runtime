@@ -31,9 +31,12 @@ jobs:
         with:
           path: .tsgo-cache
           key: tsgo-${{ runner.os }}-${{ hashFiles('build.rs', 'Cargo.lock') }}
-      - run: cargo fmt --check
+      - run: cargo fmt --all --check
       # Upstream code carries existing clippy warnings that we do not rewrite (AGENTS.md §5):
       # warnings are reported, errors fail the build.
       - run: cargo clippy --all-targets --locked
       # tests/it starts MinIO and Azurite containers; GitHub runners provide Docker.
       - run: cargo test --locked
+      # Studio builds the connectors crate without its `live` feature (mock mode only).
+      - run: cargo clippy -p donka-connectors --all-targets --locked -- -D warnings
+      - run: cargo test -p donka-connectors --locked

@@ -2046,6 +2046,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "donka-connectors"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "zen-engine",
+ "zen-tmpl",
+]
+
+[[package]]
 name = "donka-runtime"
 version = "1.28.1"
 dependencies = [
@@ -2064,6 +2078,7 @@ dependencies = [
  "chrono",
  "config",
  "dashmap",
+ "donka-connectors",
  "dotenvy",
  "futures",
  "gcloud-storage",
