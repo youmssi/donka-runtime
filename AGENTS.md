@@ -99,6 +99,7 @@ src/routes/                 HTTP endpoints (evaluate, rules + OpenAPI, project i
 src/provider/               artifact sources: s3, azure_storage, gcs, filesystem, zip
 src/data/                   artifact model (.config/project.json)
 src/immutable_loader.rs     in-memory release loader
+src/rate_limit.rs           per-token request limits (DNK-22)
 src/tsgo.rs, spec_derive.rs  TypeScript-based type derivation for OpenAPI
 crates/connectors/          connector nodes (MIT crate shared with Studio); src/connectors.rs wires it
 tests/it/                   integration tests (containers)

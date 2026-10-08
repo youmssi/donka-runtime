@@ -73,6 +73,28 @@ lists the tokens it accepts in `.config/project.json`:
 
 The artifact format is documented in Studio: `youmssi/donka`, `docs/artifact-format.md`.
 
+## Rate limits
+
+Each access token may make a set number of requests per window; past that, the Runtime answers
+`429 Too Many Requests` with `Retry-After` (whole seconds) before evaluating anything. Off unless
+`RATE_LIMIT__REQUESTS` is set.
+
+```bash
+RATE_LIMIT__REQUESTS=600     # requests per token per window
+RATE_LIMIT__WINDOW=60000     # the window, in milliseconds (default one minute)
+```
+
+- **What counts**: every call under `/api/projects/{project}/…` and `/api/rules/{project}…` made
+  with a token the project accepts. `/api/health`, `/api/version` and the API docs never count.
+- **Per token**: each token has its own allowance; a project that accepts calls without a token
+  shares one allowance among them. A wrong token gets its usual `401` and uses nothing.
+- **Bursts**: a whole window's allowance may arrive at once; after that, requests come back
+  steadily (one every `WINDOW / REQUESTS`).
+- **Answer**: on `/api/projects` the body is `{ "message": … }`; on `/api/rules` it is
+  `{ "code": "rateLimit.exceeded", "retryAfter": <seconds> }`.
+- **Per instance**: each Runtime counts on its own, so behind a load balancer with three
+  instances a token may make up to three times the limit in total.
+
 ## Other features
 
 - Connectors (outside calls from a decision): [connectors.md](connectors.md)

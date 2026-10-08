@@ -1,9 +1,10 @@
 use crate::config::{EnvironmentConfig, GlobalAgentConfig};
 use crate::provider::Agent;
+use crate::rate_limit::{self, RateLimiter};
 use crate::routes;
 use axum::extract::DefaultBodyLimit;
 use axum::http::{HeaderValue, header};
-use axum::middleware::map_response;
+use axum::middleware::{from_fn, map_response};
 use axum::response::Response;
 use axum::{Extension, Router};
 use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
@@ -51,8 +52,14 @@ pub async fn create_app(agent: Agent, config: EnvironmentConfig) -> Router<()> {
         .routes(routes!(routes::infra::health))
         .split_for_parts();
 
-    let mut app = router
-        .merge(SwaggerUi::new("/api/docs").url("/api.json", openapi))
+    let mut app = router.merge(SwaggerUi::new("/api/docs").url("/api.json", openapi));
+    if let Some(limiter) = RateLimiter::new(&config.rate_limit) {
+        limiter.spawn_cleanup();
+        app = app
+            .layer(from_fn(rate_limit::limit))
+            .layer(Extension(limiter));
+    }
+    let mut app = app
         .layer(Extension(agent))
         .layer(Extension(local_pool))
         .layer(DefaultBodyLimit::max(16 * 1024 * 1024))

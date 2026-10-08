@@ -37,6 +37,36 @@ pub struct EnvironmentConfig {
 
     #[serde(default)]
     pub decision_log: DecisionLogConfig,
+
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
+}
+
+/// Requests each access token may make per window (DNK-22). Off unless
+/// `requests` is set.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RateLimitConfig {
+    #[serde(default)]
+    pub requests: Option<u32>,
+
+    #[serde(
+        deserialize_with = "deserialize_millis",
+        default = "default_rate_limit_window"
+    )]
+    pub window: Duration,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            requests: None,
+            window: default_rate_limit_window(),
+        }
+    }
+}
+
+fn default_rate_limit_window() -> Duration {
+    Duration::from_secs(60)
 }
 
 fn default_refresh_interval() -> Duration {
@@ -278,6 +308,7 @@ impl Default for EnvironmentConfig {
             tsgo: TsgoConfig::default(),
             connectors: ConnectorsConfig::default(),
             decision_log: DecisionLogConfig::default(),
+            rate_limit: RateLimitConfig::default(),
         }
     }
 }
