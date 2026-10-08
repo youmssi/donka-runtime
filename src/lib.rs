@@ -6,6 +6,7 @@ pub mod decision_log;
 mod engine_ext;
 mod immutable_loader;
 mod provider;
+mod rate_limit;
 mod routes;
 mod rules_spec;
 mod schema;

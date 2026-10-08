@@ -43,6 +43,8 @@ Studio published, reloads them the moment they change, and evaluates them with t
   circuit breaker and secrets kept in the environment
 - **Decision log**: every evaluation goes to Studio in the background, for search, explanation
   and replay, without slowing the answer
+- **Rate limits**: a per-token request limit, answered with `429` and `Retry-After`; health is
+  never limited
 - **Traces on demand**: `trace: true` shows how each node reached its result
 - **Rules OpenAPI**: one OpenAPI document per project, with schemas derived from the rules
 - **Production-ready**: graceful shutdown, health and version endpoints, one small container
@@ -85,7 +87,7 @@ Every storage provider, token rule and setting is in [docs/configuration.md](doc
 
 | Page                                           | What it covers                                                  |
 | ---------------------------------------------- | --------------------------------------------------------------- |
-| [docs/configuration.md](docs/configuration.md) | Release storage providers, listening address, access tokens     |
+| [docs/configuration.md](docs/configuration.md) | Release storage, listening address, access tokens, rate limits  |
 | [docs/connectors.md](docs/connectors.md)       | Connector nodes, secrets, timeouts, retries, circuit breaker    |
 | [docs/decision-log.md](docs/decision-log.md)   | The feed to Studio, references, batching, retries, shutdown     |
 | [docs/rules-openapi.md](docs/rules-openapi.md) | Rules OpenAPI, TypeScript type resolution, build caching        |
