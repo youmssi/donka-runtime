@@ -28,8 +28,7 @@
     <text x="990" y="235">policy</text>
     <text x="1180" y="165">decide</text>
   </g>
-  <rect x="72" y="88" width="56" height="56" rx="14" fill="#ffffff"/>
-  <text x="100" y="128" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="32" font-weight="700" fill="#1d4f91" text-anchor="middle">D</text>
+  <g transform="translate(72,88) scale(0.875)"><rect width="64" height="64" rx="15" fill="#ffffff"/><g fill="none" stroke="#0f766e" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 15 V49 M20 15 H30 C42 15 48 23 48 32 C48 41 42 49 30 49 H20 M28 25 L35 32 L28 39"/></g></g>
   <g font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif">
     <text x="148" y="104" font-size="16" letter-spacing="3" fill="#8fb8ff" font-weight="600">DECISION MANAGEMENT</text>
     <text x="146" y="146" font-size="40" font-weight="700" fill="#ffffff">Donka Runtime</text>
