@@ -1,206 +1,112 @@
-# Donka Runtime
+![Donka Runtime](.github/assets/banner.svg)
 
-Part of [Donka](https://github.com/youmssi/donka). Fork of [gorules/agent-public](https://github.com/gorules/agent-public) (MIT); see [DONKA.md](DONKA.md) for what Donka changes.
+<h1 align="center">Donka Runtime</h1>
 
-Donka Runtime is an open-source, standalone microservice that acts as a high-performance Rules Engine over REST, without requiring a UI. It is designed to pull Releases from Object Storage, automatically re-load them at runtime when changes occur, and evaluate decision models efficiently. This ensures that your rules are always up-to-date and accessible with minimal configuration.
+<p align="center">
+    Serve released credit decisions over REST, hot-reloaded from object storage
+</p>
 
-## Environment Variables
+<p align="center">
+    <a href="https://github.com/youmssi/donka-runtime/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/youmssi/donka-runtime/ci.yml?branch=develop&label=CI" alt="CI"/></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/youmssi/donka-runtime" alt="License"/></a>
+    <img src="https://img.shields.io/badge/rust-stable-b7410e?logo=rust&logoColor=white" alt="Rust stable"/>
+    <img src="https://img.shields.io/badge/zen--engine-2.0.1-1d4f91" alt="zen-engine 2.0.1"/>
+    <a href="Dockerfile"><img src="https://img.shields.io/badge/docker-image-2496ed?logo=docker&logoColor=white" alt="Docker image"/></a>
+    <a href="https://github.com/youmssi/donka"><img src="https://img.shields.io/badge/part%20of-Donka-1d4f91" alt="Part of Donka"/></a>
+</p>
 
-### AWS
+<p align="center">
+    <a href="docs/configuration.md">Configuration</a> ·
+    <a href="docs/connectors.md">Connectors</a> ·
+    <a href="docs/decision-log.md">Decision log</a> ·
+    <a href="docs/rules-openapi.md">Rules OpenAPI</a> ·
+    <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
-In case your deployment supports IAM, most of the environment variables below are __optional__.
+## Introduction
 
-```bash
-PROVIDER__TYPE=S3
-PROVIDER__BUCKET=bucket
-PROVIDER__REGION=us-east-1 # Optional in case of IAM
-AWS_ACCESS_KEY_ID=<aws-access-key-id> # Optional in case of IAM
-AWS_SECRET_ACCESS_KEY=<aws-secret-access-key> # Optional in case of IAM
-```
+[Donka](https://github.com/youmssi/donka) is a decision management platform for credit and risk
+teams. Analysts build, test and approve scoring rules in Donka Studio, which publishes each
+release to object storage.
 
-### Azure
+Donka Runtime is the standalone service your systems call for a decision. It loads the releases
+Studio published, reloads them the moment they change, and evaluates them with the
+[ZEN engine](https://github.com/gorules/zen), with no UI and no database to run.
 
-```bash
-PROVIDER__TYPE=AzureStorage
-PROVIDER__CONNECTION_STRING=<connection-string>
-PROVIDER__CONTAINER=<container-name>
-```
+## Features
 
-### Google Cloud
+- **Hot reload**: picks up a new release (or a rollback) from S3, MinIO, Azure Blob, GCS or local
+  files without a restart
+- **Per-environment tokens**: callers send `X-Access-Token`; only hashes are in the release, and a
+  staging token is refused by production
+- **Connectors**: decisions call credit bureaus, KYC or AML providers, with timeouts, retries, a
+  circuit breaker and secrets kept in the environment
+- **Decision log**: every evaluation goes to Studio in the background, for search, explanation
+  and replay, without slowing the answer
+- **Traces on demand**: `trace: true` shows how each node reached its result
+- **Rules OpenAPI**: one OpenAPI document per project, with schemas derived from the rules
+- **Production-ready**: graceful shutdown, health and version endpoints, one small container
 
-```bash
-PROVIDER__TYPE=GCS
-PROVIDER__BUCKET=<bucket-name>
-PROVIDER__BASE64_CONTENTS=<base64-credential-contents>
-```
+## Quick start
 
-### FileSystem
-```bash
-PROVIDER__TYPE=Filesystem
-```
-
-### FileSystem Zip
-For FileSystem type, all project zips should be in ./data folder.
-You can build your own image bundled with rules by doing docker build from our image and adding layer that adds ./data folder
-```bash
-PROVIDER__TYPE=Zip
-```
-
-### MinIO
-```bash
-PROVIDER__TYPE=S3
-PROVIDER__REGION=us-east-1
-PROVIDER__BUCKET=bucket
-PROVIDER__FORCE_PATH_STYLE=true
-PROVIDER__ENDPOINT=http://localhost:9000
-PROVIDER__PREFIX=folder/
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-```
-## Access tokens
-
-Evaluate and rules requests send the token in the `X-Access-Token` header. A release artifact
-lists the tokens it accepts in `.config/project.json`:
-
-- `accessTokenHashes` (format version 2, written by Donka Studio): the lowercase hex SHA-256 of
-  each token, with the environment it was issued for. Tokens never appear in the artifact. An
-  artifact deployed to an environment (`environment.key`) only accepts that environment's
-  tokens, so a staging token is refused by production.
-- `accessTokens` (version 1): plain tokens, still accepted so older artifacts keep working.
-
-The artifact format is documented in Studio: `youmssi/donka`, `docs/artifact-format.md`.
-
-## Connectors
-
-A decision can call an outside service (a credit bureau, a KYC or AML provider) through a
-connector node: a custom node of kind `donka.connector`, authored in Donka Studio. The Runtime
-POSTs the node's JSON body (string values may be templates over the node's input, such as
-`{{ applicant.nationalId }}`) and adds the JSON response to the node's output under `outputKey`.
-When the call still fails after its retries, the node either fails the evaluation or continues
-with the `fallback` the author defined (`onError`).
-
-Secrets never travel in the artifact: a node names its secret (`BUREAU_KEY`) and the Runtime
-reads the value from `DONKA_SECRET_<NAME>`. A missing secret fails the call and names the
-secret, never a value. Values never appear in responses, traces or logs.
+Run it against a MinIO bucket that Studio publishes the `staging` environment to:
 
 ```bash
-DONKA_SECRET_BUREAU_KEY=...         # one variable per secret a release uses
-CONNECTORS__TIMEOUT=3000            # milliseconds per attempt when the node does not say
-CONNECTORS__MAX_TIMEOUT=10000       # the most a node may ask for
-CONNECTORS__RETRIES=1               # attempts after the first one when the node does not say
-CONNECTORS__MAX_RETRIES=3           # the most a node may ask for
-CONNECTORS__BREAKER_FAILURES=5      # consecutive failed calls to one URL that pause calls to it
-CONNECTORS__BREAKER_COOLDOWN=30000  # milliseconds before one call is tried again
+docker build -t donka-runtime .
+docker run --rm -p 8080:8080 \
+  -e PROVIDER__TYPE=S3 -e PROVIDER__BUCKET=donka-releases -e PROVIDER__REGION=us-east-1 \
+  -e PROVIDER__ENDPOINT=http://minio:9000 -e PROVIDER__FORCE_PATH_STYLE=true \
+  -e PROVIDER__PREFIX=staging/ \
+  -e AWS_ACCESS_KEY_ID=... -e AWS_SECRET_ACCESS_KEY=... \
+  donka-runtime
 ```
 
-Server errors (5xx, 429, 408), timeouts and unreachable services are retried with a short
-backoff (100 ms, doubling, at most 1 s); other refusals and non-JSON answers are not. The node's
-trace (`trace: true`) shows the outcome (`ok`, `fallback`, `error`), the attempts, the status and
-the error code. Other custom node kinds are not evaluated, as upstream.
-
-The handler is the `donka-connectors` crate (`crates/connectors`, MIT). Studio uses the same
-crate without its `live` feature to simulate connector nodes with their mock responses, and to
-replay logged decisions with what each service answered at the time (`ConnectorAdapter::replay`).
-
-## Decision log
-
-When it is configured, the Runtime sends a record of every evaluation to Donka Studio's decision
-log: the input, the output (or the error the caller received), the trace, the decision key, the
-project, release and environment that answered, the time and the duration. Studio stores it
-encrypted, makes it searchable, and can replay it against the same release.
+Then ask for a decision with a token issued in Studio (**Environments → Runtime tokens**):
 
 ```bash
-DECISION_LOG__URL=https://studio.example/api/v1/decision-log/records
-DECISION_LOG__TOKEN=dnk_log_...          # issued in Studio for this Runtime's environment
-DECISION_LOG__BATCH_SIZE=100             # records sent together, at most
-DECISION_LOG__BATCH_BYTES=4194304        # bytes sent together, at most
-DECISION_LOG__FLUSH_INTERVAL=1000        # milliseconds a record waits for others
-DECISION_LOG__QUEUE_CAPACITY=10000       # records held while Studio cannot be reached
-DECISION_LOG__TIMEOUT=10000              # milliseconds allowed per send
-DECISION_LOG__SHUTDOWN_TIMEOUT=10000     # milliseconds to send what is queued when stopping
+curl -s -X POST localhost:8080/api/projects/credit-pme/evaluate/eligibility \
+  -H "X-Access-Token: $DONKA_RUNTIME_TOKEN" -H 'content-type: application/json' \
+  -H 'X-Donka-Reference: APP-2026-0042' \
+  -d '{ "context": { "applicant": { "monthlyIncome": 450000 } } }'
 ```
 
-Set both `DECISION_LOG__URL` and `DECISION_LOG__TOKEN`, or neither (the log is off); one without
-the other stops startup.
+| Endpoint                                     | What it does                                   |
+| -------------------------------------------- | ---------------------------------------------- |
+| `POST /api/projects/{project}/evaluate/{key}` | Evaluate a decision (`context`, `trace`)      |
+| `POST /api/rules/{project}/evaluate/{path}`   | Evaluate a rule by path                       |
+| `GET /api/rules/{project}`                    | OpenAPI document of the project's rules       |
+| `GET /api/projects/{project}/entrypoints`     | The decisions a project exposes               |
+| `GET /api/health`, `GET /api/version`         | Health and version                            |
+| `GET /api/docs`                               | Interactive API documentation                 |
 
-- **Never slows an answer.** Records queue in memory and leave in batches from a background task.
-  When the queue is full (Studio unreachable for long), new records are dropped and the drops
-  are logged as errors.
-- **Retried.** Timeouts, unreachable Studio, `408`, `429` and `5xx` are retried with backoff
-  (1 s, doubling, at most 30 s). Any other refusal (a wrong token, a batch too large) is logged
-  and the batch is dropped. Records Studio rejects one by one (an unknown release, an
-  environment the token does not cover) are logged with their id and code.
-- **On stop** (SIGTERM, Ctrl-C), requests in flight finish and queued records are sent within
-  the shutdown timeout.
-- **Reference.** Callers may send `X-Donka-Reference` (1 to 200 visible ASCII characters, e.g. an
-  application number) to find the decision in Studio; anything else is refused with `400`.
-  Every logged answer, successful or not, carries `X-Decision-Id`, the record's id.
-- **Trace.** The trace is always recorded, for replay; the answer includes it only when the
-  caller asks (`trace: true`), as before.
-- Only artifacts that name their project, release and environment (as Studio writes them) are
-  logged. Records hold no access token, and connector traces hold no secret.
+Every storage provider, token rule and setting is in [docs/configuration.md](docs/configuration.md).
 
-The feed format is documented in Studio: `youmssi/donka`, `docs/decision-log-feed.md`.
+## Documentation
 
-## Rules OpenAPI
+| Page                                           | What it covers                                                  |
+| ---------------------------------------------- | --------------------------------------------------------------- |
+| [docs/configuration.md](docs/configuration.md) | Release storage providers, listening address, access tokens     |
+| [docs/connectors.md](docs/connectors.md)       | Connector nodes, secrets, timeouts, retries, circuit breaker    |
+| [docs/decision-log.md](docs/decision-log.md)   | The feed to Studio, references, batching, retries, shutdown     |
+| [docs/rules-openapi.md](docs/rules-openapi.md) | Rules OpenAPI, TypeScript type resolution, build caching        |
+| [Artifact format](https://github.com/youmssi/donka/blob/develop/docs/artifact-format.md) | What Studio publishes (`.config/project.json`) |
+| [DONKA.md](DONKA.md)                           | What this fork changes from upstream                            |
 
-`GET /api/rules/{project}` returns an OpenAPI 3 document describing the
-deployed release's evaluable rules — one `POST /evaluate/{path}` operation per
-graph and policy, tagged by kind.
+## Contributing
 
-Request and response schemas come from the rule itself when it declares them on
-its input/output nodes. Anything undeclared is derived by analysing the release
-as a single workspace: property references become a nested JSON Schema, and the
-return types of function nodes are resolved by type-checking their TypeScript.
-
-The document is built on the first request for a project and reused until the
-release changes, so only that first request pays for the analysis.
-
-### Type resolution
-
-Function-node types are resolved by [tsgo](https://github.com/microsoft/typescript-go),
-the TypeScript compiler compiled to WebAssembly and run under wasmtime. It is
-precompiled at build time (`build.rs`) and embedded in the binary, so startup
-deserializes an artifact rather than compiling one.
-
-Running the compiler in a wasm sandbox is what makes it safe to type-check
-untrusted rule content in-process: a guest that panics, traps, runs away or
-exhausts memory is contained by wasmtime and surfaces as an unresolved type,
-never as a crashed agent. Every failure degrades to publishing the declared
-schema instead of the derived one.
+Read [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md) first. Stories live in the
+[Studio backlog](https://github.com/youmssi/donka/tree/develop/docs/backlog); each one gets a
+`dnk-<n>-<slug>` branch, squash-merged into `develop`.
 
 ```bash
-TSGO__ENABLED=true         # set false to skip type resolution entirely
-TSGO__MEMORY_BYTES=2147483648
-TSGO__TIMEOUT=30000        # milliseconds
-TSGO__CACHE_CAPACITY=4096  # resolved function types held per process
+cargo fmt --all --check
+cargo clippy --all-targets
+cargo test                    # tests/it needs Docker (MinIO, Azurite)
+cargo test -p donka-connectors
 ```
 
-### Build caching
+## License
 
-Precompiling the module costs ~26 CPU-seconds. Cargo caches it locally, so only
-a change to `build.rs` itself rebuilds it — but CI and Docker start cold. Point
-`TSGO_CWASM_CACHE` at a directory to keep the artifact across builds:
-
-```bash
-TSGO_CWASM_CACHE=.tsgo-cache cargo build --release
-```
-
-`build.rs` revalidates whatever it finds there, checking both that the artifact
-came from the same tsgo revision and target and that it still loads. A stale or
-corrupt entry is rebuilt rather than used, so the cache cannot ship a module
-that fails at runtime.
-
-CI restores this directory with `actions/cache`, and the Dockerfile keeps
-dependencies and the module in a stage that only the manifests and `build.rs`
-invalidate.
-
-### Building offline
-
-`build.rs` fetches the tsgo wasm module from the `tsgo-wasm` crate's GitHub
-release and verifies its checksum. For air-gapped builds, point it at a local
-copy instead:
-
-```bash
-TSGO_WASM_FILE=/path/to/tsgo.wasm.zst cargo build --release
-```
+MIT, see [LICENSE](LICENSE). Donka Runtime is a fork of
+[gorules/agent-public](https://github.com/gorules/agent-public); the original copyright notice
+is kept.
