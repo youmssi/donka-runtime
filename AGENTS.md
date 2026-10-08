@@ -42,7 +42,8 @@ contributors read it too. `CLAUDE.md` imports it and adds what is specific to th
    implementation, a config flag) rather than editing upstream logic in place. Do not reformat or
    refactor upstream code outside what the story needs.
 5. **No hardcoded configuration.** New settings use the existing `config` crate layout
-   (`SECTION__KEY` environment variables) and are documented in `README.md`.
+   (`SECTION__KEY` environment variables) and are documented in `docs/` (`configuration.md`,
+   or the feature's page).
 6. **No secret in artifacts, logs, traces or errors.** Access tokens are compared as hashes
    (from DNK-13).
 7. **Additive changes only** to the artifact format and the HTTP API.
@@ -101,5 +102,7 @@ src/immutable_loader.rs     in-memory release loader
 src/tsgo.rs, spec_derive.rs  TypeScript-based type derivation for OpenAPI
 crates/connectors/          connector nodes (MIT crate shared with Studio); src/connectors.rs wires it
 tests/it/                   integration tests (containers)
+docs/                       configuration, connectors, decision log, rules OpenAPI
+.github/assets/             README banner
 DONKA.md                    what this fork changes and why
 ```
