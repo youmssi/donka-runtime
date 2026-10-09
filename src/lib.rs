@@ -1,6 +1,7 @@
 pub mod app;
 pub mod config;
 mod connectors;
+mod contract;
 mod data;
 pub mod decision_log;
 mod engine_ext;

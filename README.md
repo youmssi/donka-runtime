@@ -19,6 +19,7 @@
     <a href="docs/configuration.md">Configuration</a> ·
     <a href="docs/connectors.md">Connectors</a> ·
     <a href="docs/decision-log.md">Decision log</a> ·
+    <a href="docs/contracts.md">Input contracts</a> ·
     <a href="docs/rules-openapi.md">Rules OpenAPI</a> ·
     <a href="CONTRIBUTING.md">Contributing</a>
 </p>
@@ -90,6 +91,7 @@ Every storage provider, token rule and setting is in [docs/configuration.md](doc
 | [docs/configuration.md](docs/configuration.md) | Release storage, listening address, access tokens, rate limits  |
 | [docs/connectors.md](docs/connectors.md)       | Connector nodes, secrets, timeouts, retries, circuit breaker    |
 | [docs/decision-log.md](docs/decision-log.md)   | The feed to Studio, references, batching, retries, shutdown     |
+| [docs/contracts.md](docs/contracts.md)         | Input contracts: the `400` naming the field a request gets wrong |
 | [docs/rules-openapi.md](docs/rules-openapi.md) | Rules OpenAPI, TypeScript type resolution, build caching        |
 | [Artifact format](https://github.com/youmssi/donka/blob/develop/docs/artifact-format.md) | What Studio publishes (`.config/project.json`) |
 | [DONKA.md](DONKA.md)                           | What this fork changes from upstream                            |

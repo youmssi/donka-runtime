@@ -1,4 +1,5 @@
 use crate::Agent;
+use crate::contract;
 use crate::decision_log;
 use crate::engine_ext::EngineExtension;
 use anyhow::{Context, anyhow};
@@ -125,6 +126,7 @@ pub async fn evaluate(
                     (
                         anyhow::Error::msg(e.to_string()),
                         decision_log::error_trace(&e),
+                        contract::violation(&cloned_project_data.engine, &cloned_key, &e),
                     )
                 })
         })
@@ -132,9 +134,13 @@ pub async fn evaluate(
         .expect("Thread failed to join");
     let result = match result {
         Ok(result) => result,
-        Err((error, trace)) => {
+        Err((error, trace, violation)) => {
             tracing::error!(error = debug(&error), "Failed to evaluate decision model");
-            return Ok(failed(logged, error.into(), trace));
+            let error = match violation {
+                Some(violation) => EvaluateError::Contract(error, violation),
+                None => error.into(),
+            };
+            return Ok(failed(logged, error, trace));
         }
     };
 
@@ -184,6 +190,8 @@ fn failed(
 pub enum EvaluateError {
     EngineError(Box<zen_engine::EvaluationError>),
     Anyhow((StatusCode, anyhow::Error)),
+    /// The request breaks the decision's input contract (DNK-37).
+    Contract(anyhow::Error, contract::Violation),
 }
 
 impl EvaluateError {
@@ -196,6 +204,10 @@ impl EvaluateError {
             EvaluateError::Anyhow((status, error)) => {
                 (status, serde_json::json!({ "message": error.to_string() }))
             }
+            EvaluateError::Contract(error, violation) => (
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({ "message": error.to_string(), "contract": violation }),
+            ),
         }
     }
 }
