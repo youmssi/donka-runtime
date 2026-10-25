@@ -84,14 +84,14 @@ impl MinioImage {
 
 impl Image for MinioImage {
     // minio/minio was removed from Docker Hub, so pulls fail with "repository does not exist".
-    // pgsty/minio is a maintained community build of the same server: same command, same
+    // pgsty/silo (PGSTY SILO) is the maintained fork of the same server: same command, same
     // MINIO_ROOT_* variables and the same "API:" startup line this container waits for.
     fn name(&self) -> &str {
-        "pgsty/minio"
+        "pgsty/silo"
     }
 
     fn tag(&self) -> &str {
-        "RELEASE.2026-08-04T00-00-00Z"
+        "RELEASE.2026-10-18T00-00-00Z"
     }
 
     fn ready_conditions(&self) -> Vec<WaitFor> {
