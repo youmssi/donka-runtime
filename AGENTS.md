@@ -58,6 +58,10 @@ Small verified steps; prove it works, then say so; report honestly; root-cause f
 what the story asks and nothing more; ask about product or irreversible decisions; decide
 conventional technical ones and say what you chose.
 
+A change an integrator or operator would notice updates its page in `docs/` in the same story;
+the product documentation site assembles these pages (DNK-66). Generated references (the
+OpenAPI document) are never edited by hand.
+
 ## 5. Checks before every push
 
 ```bash

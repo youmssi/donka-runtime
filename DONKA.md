@@ -11,14 +11,24 @@ regularly. The original license and copyright notice in `LICENSE` stay as they a
 
 | Item | Change |
 |---|---|
-| D1 | Rebrand; upgrade zen-engine to 2.0.1 (same pin as Studio, enforced by Studio's drift check) |
+| D1 | Rebrand; upgrade zen-engine to 2.0.1 (done, DNK-12; same pin as Studio, enforced by Studio's drift check) |
 | D2 | Hashed, per-environment access tokens in `.config/project.json` (done, DNK-13: `src/data/access.rs`) |
 | D3 | Connector handler (custom-node adapter) with secrets from env, timeouts, retries, circuit breaker (done, DNK-17: `crates/connectors`, wired in `src/connectors.rs`) |
 | D4 | Decision-log emitter: ships input, output, release and trace to Studio asynchronously (done, DNK-18: `src/decision_log.rs`; graceful stop in `src/main.rs`) |
 | D5 | Per-token rate limits on the evaluate and rules routes, `429` with `Retry-After` (done, DNK-22: `src/rate_limit.rs`) |
 | D6 | Input contracts: a request breaking the decision's input schema gets `400` naming the field (done, DNK-37: `src/contract.rs`, `docs/contracts.md`) |
+| D7 | zen-engine brought to the latest 2.1.x, Runtime first, accepted on replay and scenario evidence (planned, DNK-62) |
+| D8 | Connectors authenticate with OAuth2 client credentials and mutual TLS (planned, DNK-63) |
+| D9 | Every secret setting also accepted as a file (`_FILE`) (planned, DNK-65) |
+| D10 | Published signed images; the `Filesystem` provider serves a disk volume shared with Studio (planned, DNK-64) |
+| D11 | Load test with published latency and throughput targets, checked in CI (planned, DNK-67) |
+| D12 | Image scanning, SLSA provenance, OpenSSF Scorecard, threat model and security contact (planned, DNK-49, DNK-69, DNK-73) |
+| D13 | Batch evaluation of many inputs against one release (Phase 2 candidate, DNK-70) |
+| D14 | Releases that take effect at a scheduled time, from the artifact already held (Phase 2 candidate, DNK-78) |
 
-Changes are kept behind small extension points so upstream merges stay easy.
+Changes are kept behind small extension points so upstream merges stay easy. The Runtime never
+reads Studio's licence: released rules keep being served whatever Studio's state (DNK-77). Where
+each capability stands across Donka: Studio's `docs/capability-map.md`.
 
 ## Names we keep on purpose
 
