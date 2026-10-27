@@ -17,7 +17,7 @@ regularly. The original license and copyright notice in `LICENSE` stay as they a
 | D4 | Decision-log emitter: ships input, output, release and trace to Studio asynchronously (done, DNK-18: `src/decision_log.rs`; graceful stop in `src/main.rs`) |
 | D5 | Per-token rate limits on the evaluate and rules routes, `429` with `Retry-After` (done, DNK-22: `src/rate_limit.rs`) |
 | D6 | Input contracts: a request breaking the decision's input schema gets `400` naming the field (done, DNK-37: `src/contract.rs`, `docs/contracts.md`) |
-| D7 | zen-engine brought to the latest 2.1.x, Runtime first, accepted on replay and scenario evidence (planned, DNK-62) |
+| D7 | zen-engine brought to 2.1.6, Runtime first, accepted on replay and scenario evidence (done, DNK-62: `tests/self_reference.rs`, null inputs in `tests/contract.rs`) |
 | D8 | Connectors authenticate with OAuth2 client credentials and mutual TLS (planned, DNK-63) |
 | D9 | Every secret setting also accepted as a file (`_FILE`) (planned, DNK-65) |
 | D10 | Published signed images; the `Filesystem` provider serves a disk volume shared with Studio (planned, DNK-64) |

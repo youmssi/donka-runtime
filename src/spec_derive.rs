@@ -224,9 +224,28 @@ mod tests {
     /// become an object that forbids every key.
     #[test]
     fn uninformative_types_leave_the_schema_unset() {
-        let entry = enrich_one("Pricing Rule", expression_graph());
+        let mut graph = expression_graph();
+        graph["nodes"][1]["content"]["expressions"] = json!([]);
+        let entry = enrich_one("Pricing Rule", graph);
 
         assert_eq!(entry.output_schema, None);
+    }
+
+    /// From zen-engine 2.1 (DNK-62), an expression node's outputs are listed
+    /// by key, and arithmetic types its result as a number.
+    #[test]
+    fn expression_outputs_are_listed_by_key() {
+        let entry = enrich_one("Pricing Rule", expression_graph());
+        let output = entry.output_schema.as_deref().expect("output schema");
+        assert_eq!(output["properties"]["total"], json!({ "type": "number" }));
+        assert_eq!(output["required"], json!(["total"]));
+
+        // A value passed through keeps its key; its type is the caller's.
+        let mut graph = expression_graph();
+        graph["nodes"][1]["content"]["expressions"][0]["value"] = json!("cart.label");
+        let entry = enrich_one("Pricing Rule", graph);
+        let output = entry.output_schema.as_deref().expect("output schema");
+        assert_eq!(output["properties"]["total"], json!({}));
     }
 
     #[test]
