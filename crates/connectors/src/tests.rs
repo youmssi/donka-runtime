@@ -106,6 +106,35 @@ fn settings_are_checked() {
         )
         .is_ok()
     );
+    let oauth = |extra: Value| {
+        let mut auth = json!({
+            "type": "oauth2",
+            "tokenUrl": "https://login.bank.example/token",
+            "clientId": "donka-runtime",
+            "secret": "CBS_CLIENT_SECRET",
+            "scopes": ["score.read"]
+        });
+        for (key, value) in extra.as_object().unwrap() {
+            auth[key] = value.clone();
+        }
+        with("auth", auth)
+    };
+    assert!(oauth(json!({})).is_ok());
+    assert!(oauth(json!({ "scopes": [] })).is_ok());
+    assert!(oauth(json!({ "tokenUrl": "ldap://login" })).is_err());
+    assert!(oauth(json!({ "clientId": "" })).is_err());
+    assert!(oauth(json!({ "secret": "lower" })).is_err());
+    assert!(oauth(json!({ "scopes": ["two words"] })).is_err());
+    assert!(
+        oauth(json!({ "clientSecret": "abc" })).is_err(),
+        "never a value"
+    );
+    let tls = |value: Value| with("tls", value);
+    assert!(tls(json!({ "certificate": "CBS_CERT", "key": "CBS_KEY" })).is_ok());
+    assert!(tls(json!({ "certificate": "CBS_CERT", "key": "CBS_KEY", "ca": "CBS_CA" })).is_ok());
+    assert!(tls(json!({ "certificate": "CBS_CERT" })).is_err());
+    assert!(tls(json!({ "certificate": "CBS_CERT", "key": "cbs key" })).is_err());
+    assert!(tls(json!({ "certificate": "C", "key": "K", "pem": "-----BEGIN" })).is_err());
     assert!(with("onError", json!("ignore")).is_err());
     assert!(
         with("secretValue", json!("abc")).is_err(),
@@ -635,5 +664,480 @@ mod live {
             Some("value")
         );
         assert_eq!(EnvSecrets.get("CONNECTORS_TEST_ABSENT"), None);
+    }
+
+    fn adapter_with(limits: Limits, secrets: &[(&str, &str)]) -> ConnectorAdapter {
+        let secrets = Fixed(
+            secrets
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                .collect(),
+        );
+        ConnectorAdapter::live(limits, Arc::new(secrets))
+    }
+
+    // ----- OAuth2 client credentials (DNK-63) ----------------------------------
+
+    const CLIENT_SECRET: &str = "client-s3cr3t";
+
+    /// A token endpoint and a service that accepts only the token issued last.
+    #[derive(Default)]
+    struct Issuer {
+        token_hits: AtomicU32,
+        api_hits: AtomicU32,
+        /// The status the token endpoint answers; 0 issues tokens.
+        token_status: AtomicU32,
+        expires_in: AtomicU32,
+        valid: Mutex<String>,
+        requests: Mutex<Vec<(String, String)>>,
+    }
+
+    async fn issuer() -> (String, Arc<Issuer>) {
+        let issuer = Arc::new(Issuer::default());
+        issuer.expires_in.store(3600, Ordering::SeqCst);
+        let app = Router::new()
+            .route(
+                "/token",
+                post(
+                    |State(issuer): State<Arc<Issuer>>, headers: HeaderMap, form: String| async move {
+                        let n = issuer.token_hits.fetch_add(1, Ordering::SeqCst) + 1;
+                        let authorization = headers
+                            .get("authorization")
+                            .map(|v| v.to_str().unwrap().to_owned())
+                            .unwrap_or_default();
+                        issuer.requests.lock().unwrap().push((authorization, form));
+                        let status = issuer.token_status.load(Ordering::SeqCst);
+                        if status != 0 {
+                            return StatusCode::from_u16(status as u16).unwrap().into_response();
+                        }
+                        let token = format!("token-{n}");
+                        *issuer.valid.lock().unwrap() = token.clone();
+                        Json(json!({
+                            "access_token": token,
+                            "token_type": "Bearer",
+                            "expires_in": issuer.expires_in.load(Ordering::SeqCst)
+                        }))
+                        .into_response()
+                    },
+                ),
+            )
+            .route(
+                "/locked",
+                post(|State(issuer): State<Arc<Issuer>>| async move {
+                    issuer.api_hits.fetch_add(1, Ordering::SeqCst);
+                    StatusCode::UNAUTHORIZED
+                }),
+            )
+            .route(
+                "/score",
+                post(
+                    |State(issuer): State<Arc<Issuer>>, headers: HeaderMap| async move {
+                        issuer.api_hits.fetch_add(1, Ordering::SeqCst);
+                        let expected = format!("Bearer {}", issuer.valid.lock().unwrap());
+                        match headers.get("authorization") {
+                            Some(value) if value.to_str().unwrap() == expected => {
+                                Json(json!({ "score": 700 })).into_response()
+                            }
+                            _ => StatusCode::UNAUTHORIZED.into_response(),
+                        }
+                    },
+                ),
+            )
+            .with_state(issuer.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (base, issuer)
+    }
+
+    fn oauth_config(base: &str, extra: Value) -> Value {
+        config(
+            format!("{base}/score"),
+            json!({
+                "auth": {
+                    "type": "oauth2",
+                    "tokenUrl": format!("{base}/token"),
+                    "clientId": "donka-runtime",
+                    "secret": "CBS_CLIENT_SECRET",
+                    "scopes": ["score.read", "score.write"]
+                }
+            }),
+        )
+        .as_object()
+        .unwrap()
+        .clone()
+        .into_iter()
+        .chain(extra.as_object().unwrap().clone())
+        .collect::<serde_json::Map<_, _>>()
+        .into()
+    }
+
+    fn oauth_adapter(limits: Limits) -> ConnectorAdapter {
+        adapter_with(limits, &[("CBS_CLIENT_SECRET", CLIENT_SECRET)])
+    }
+
+    #[tokio::test]
+    async fn an_oauth2_token_is_asked_for_once_and_reused() {
+        let (base, issuer) = issuer().await;
+        let adapter = oauth_adapter(Limits::default());
+        for _ in 0..2 {
+            let response = adapter
+                .handle(request(oauth_config(&base, json!({})), input()))
+                .await
+                .expect("response");
+            assert_eq!(
+                response.output.to_value()["bureau"],
+                json!({ "score": 700 })
+            );
+            let trace = response.trace_data.unwrap();
+            assert_no_secret(&trace);
+            assert!(!format!("{trace:?}").contains("token-1"), "{trace:?}");
+            assert!(!format!("{trace:?}").contains(CLIENT_SECRET), "{trace:?}");
+        }
+        assert_eq!(issuer.token_hits.load(Ordering::SeqCst), 1);
+        assert_eq!(issuer.api_hits.load(Ordering::SeqCst), 2);
+        // Client credentials in HTTP Basic, the grant and the scopes in the form.
+        let (authorization, form) = issuer.requests.lock().unwrap()[0].clone();
+        assert_eq!(
+            authorization, "Basic ZG9ua2EtcnVudGltZTpjbGllbnQtczNjcjN0",
+            "base64 of donka-runtime:client-s3cr3t"
+        );
+        assert_eq!(
+            form,
+            "grant_type=client_credentials&scope=score.read+score.write"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_token_is_renewed_before_it_expires() {
+        let (base, issuer) = issuer().await;
+        issuer.expires_in.store(1, Ordering::SeqCst);
+        let adapter = oauth_adapter(Limits::default());
+        let call = || adapter.handle(request(oauth_config(&base, json!({})), input()));
+        call().await.expect("first");
+        call().await.expect("still fresh");
+        assert_eq!(issuer.token_hits.load(Ordering::SeqCst), 1);
+        tokio::time::sleep(Duration::from_millis(950)).await;
+        call().await.expect("renewed");
+        assert_eq!(issuer.token_hits.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn a_refused_token_is_renewed_once() {
+        let (base, issuer) = issuer().await;
+        let adapter = oauth_adapter(Limits::default());
+        let call = || adapter.handle(request(oauth_config(&base, json!({})), input()));
+        call().await.expect("first");
+        // The service revokes the token: the next call is refused, a new token is asked
+        // for, and the call goes through.
+        *issuer.valid.lock().unwrap() = "revoked".to_owned();
+        call().await.expect("renewed after 401");
+        assert_eq!(issuer.token_hits.load(Ordering::SeqCst), 2);
+        assert_eq!(issuer.api_hits.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn a_service_that_keeps_refusing_is_asked_once_more_only() {
+        let (base, issuer) = issuer().await;
+        let config = oauth_config(
+            &base,
+            json!({ "url": format!("{base}/locked"), "retries": 2 }),
+        );
+        let error = oauth_adapter(Limits::default())
+            .handle(request(config, input()))
+            .await
+            .expect_err("refused twice");
+        assert_eq!(
+            error.source.to_string(),
+            "connector \"Bureau\": the service answered 401"
+        );
+        assert_eq!(
+            issuer.api_hits.load(Ordering::SeqCst),
+            2,
+            "the call, then once with a new token"
+        );
+        assert_eq!(issuer.token_hits.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn a_failing_token_endpoint_counts_towards_retries_and_the_circuit() {
+        let (base, issuer) = issuer().await;
+        issuer.token_status.store(503, Ordering::SeqCst);
+        let limits = Limits {
+            breaker_failures: 2,
+            ..Limits::default()
+        };
+        let adapter = oauth_adapter(limits);
+        let call = || {
+            adapter.handle(request(
+                oauth_config(&base, json!({ "retries": 1 })),
+                input(),
+            ))
+        };
+        let error = call().await.expect_err("token endpoint down");
+        assert!(
+            error
+                .source
+                .to_string()
+                .contains("the token endpoint answered 503")
+        );
+        assert_eq!(issuer.token_hits.load(Ordering::SeqCst), 2, "retried once");
+        call().await.expect_err("down again");
+        assert_eq!(issuer.token_hits.load(Ordering::SeqCst), 4);
+        let error = call().await.expect_err("circuit open");
+        assert!(
+            error.source.to_string().contains("paused"),
+            "{}",
+            error.source
+        );
+        assert_eq!(issuer.token_hits.load(Ordering::SeqCst), 4);
+        assert_eq!(issuer.api_hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn refused_client_credentials_are_not_retried() {
+        let (base, issuer) = issuer().await;
+        issuer.token_status.store(401, Ordering::SeqCst);
+        let error = oauth_adapter(Limits::default())
+            .handle(request(
+                oauth_config(&base, json!({ "retries": 3 })),
+                input(),
+            ))
+            .await
+            .expect_err("bad client");
+        assert_eq!(
+            error.source.to_string(),
+            "connector \"Bureau\": the token endpoint answered 401"
+        );
+        assert_eq!(issuer.token_hits.load(Ordering::SeqCst), 1);
+        assert_no_secret(&error.trace);
+        assert!(!format!("{:?}", error.trace).contains(CLIENT_SECRET));
+    }
+
+    // ----- Mutual TLS (DNK-63) --------------------------------------------------
+
+    struct Pki {
+        ca: String,
+        client_cert: String,
+        client_key: String,
+        stranger_cert: String,
+        stranger_key: String,
+    }
+
+    /// A CA, a server certificate for `localhost` and a client certificate it signed, and a
+    /// client certificate from another CA. Returns the HTTPS base URL of a service that
+    /// requires a client certificate from the CA.
+    async fn mtls_service() -> (String, Pki, Arc<AtomicU32>) {
+        use rcgen::{BasicConstraints, CertificateParams, CertifiedIssuer, IsCa, KeyPair};
+        let authority = |name: &str| {
+            let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
+            params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+            params
+                .distinguished_name
+                .push(rcgen::DnType::CommonName, name);
+            CertifiedIssuer::self_signed(params, KeyPair::generate().unwrap()).unwrap()
+        };
+        let ca = authority("Bank test CA");
+        let other = authority("Someone else's CA");
+        let leaf = |names: Vec<String>, issuer: &CertifiedIssuer<'_, KeyPair>| {
+            let key = KeyPair::generate().unwrap();
+            let cert = CertificateParams::new(names)
+                .unwrap()
+                .signed_by(&key, issuer)
+                .unwrap();
+            (cert, key)
+        };
+        let (server_cert, server_key) = leaf(vec!["localhost".into()], &ca);
+        let (client_cert, client_key) = leaf(vec!["donka-runtime".into()], &ca);
+        let (stranger_cert, stranger_key) = leaf(vec!["donka-runtime".into()], &other);
+
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(ca.der().clone()).unwrap();
+        let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
+            Arc::new(roots),
+            provider.clone(),
+        )
+        .build()
+        .unwrap();
+        let config = rustls::ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_client_cert_verifier(verifier)
+            .with_single_cert(
+                vec![server_cert.der().clone()],
+                rustls::pki_types::PrivateKeyDer::Pkcs8(server_key.serialize_der().into()),
+            )
+            .unwrap();
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+        let hits = Arc::new(AtomicU32::new(0));
+        let app = Router::new()
+            .route(
+                "/score",
+                post(|State(hits): State<Arc<AtomicU32>>| async move {
+                    hits.fetch_add(1, Ordering::SeqCst);
+                    Json(json!({ "score": 640 }))
+                }),
+            )
+            .with_state(hits.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                let (acceptor, app) = (acceptor.clone(), app.clone());
+                tokio::spawn(async move {
+                    // A refused handshake ends the connection; the client reports it.
+                    let Ok(stream) = acceptor.accept(stream).await else {
+                        return;
+                    };
+                    let service = hyper_util::service::TowerToHyperService::new(app);
+                    let _ = hyper_util::server::conn::auto::Builder::new(
+                        hyper_util::rt::TokioExecutor::new(),
+                    )
+                    .serve_connection(hyper_util::rt::TokioIo::new(stream), service)
+                    .await;
+                });
+            }
+        });
+        let pki = Pki {
+            ca: ca.pem(),
+            client_cert: client_cert.pem(),
+            client_key: client_key.serialize_pem(),
+            stranger_cert: stranger_cert.pem(),
+            stranger_key: stranger_key.serialize_pem(),
+        };
+        (format!("https://localhost:{port}"), pki, hits)
+    }
+
+    fn mtls_config(base: &str, tls: Value) -> Value {
+        let mut config = config(
+            format!("{base}/score"),
+            json!({ "auth": { "type": "none" } }),
+        );
+        config["tls"] = tls;
+        config
+    }
+
+    fn tls_names(ca: bool) -> Value {
+        let mut tls = json!({ "certificate": "CBS_CERT", "key": "CBS_KEY" });
+        if ca {
+            tls["ca"] = json!("CBS_CA");
+        }
+        tls
+    }
+
+    #[tokio::test]
+    async fn a_client_certificate_from_the_trusted_ca_is_accepted() {
+        let (base, pki, hits) = mtls_service().await;
+        let adapter = adapter_with(
+            Limits::default(),
+            &[
+                ("CBS_CERT", &pki.client_cert),
+                ("CBS_KEY", &pki.client_key),
+                ("CBS_CA", &pki.ca),
+            ],
+        );
+        let response = adapter
+            .handle(request(mtls_config(&base, tls_names(true)), input()))
+            .await
+            .expect("mutual TLS");
+        assert_eq!(
+            response.output.to_value()["bureau"],
+            json!({ "score": 640 })
+        );
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert!(!format!("{:?}", response.trace_data).contains("PRIVATE KEY"));
+    }
+
+    #[tokio::test]
+    async fn a_certificate_the_service_does_not_trust_fails_with_a_clear_error() {
+        let (base, pki, hits) = mtls_service().await;
+        let adapter = adapter_with(
+            Limits::default(),
+            &[
+                ("CBS_CERT", &pki.stranger_cert),
+                ("CBS_KEY", &pki.stranger_key),
+                ("CBS_CA", &pki.ca),
+            ],
+        );
+        let error = adapter
+            .handle(request(mtls_config(&base, tls_names(true)), input()))
+            .await
+            .expect_err("refused certificate");
+        let message = error.source.to_string();
+        assert_eq!(
+            message,
+            "connector \"Bureau\": the secure connection failed: received fatal alert: UnknownCA"
+        );
+        let trace = format!("{:?}", error.trace);
+        assert!(trace.contains("\"tls\""), "{trace}");
+        assert!(!message.contains("PRIVATE KEY") && !trace.contains("PRIVATE KEY"));
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn a_service_certificate_from_an_unknown_ca_is_refused() {
+        let (base, pki, _) = mtls_service().await;
+        let adapter = adapter_with(
+            Limits::default(),
+            &[("CBS_CERT", &pki.client_cert), ("CBS_KEY", &pki.client_key)],
+        );
+        let error = adapter
+            .handle(request(mtls_config(&base, tls_names(false)), input()))
+            .await
+            .expect_err("unknown issuer");
+        assert!(
+            error
+                .source
+                .to_string()
+                .contains("invalid peer certificate"),
+            "{}",
+            error.source
+        );
+    }
+
+    #[tokio::test]
+    async fn a_secret_that_is_not_a_certificate_is_named_not_shown() {
+        let (base, _, hits) = mtls_service().await;
+        let adapter = adapter_with(
+            Limits::default(),
+            &[("CBS_CERT", "not-a-certificate"), ("CBS_KEY", "not-a-key")],
+        );
+        let error = adapter
+            .handle(request(mtls_config(&base, tls_names(false)), input()))
+            .await
+            .expect_err("invalid certificate");
+        assert_eq!(
+            error.source.to_string(),
+            "connector \"Bureau\": secrets CBS_CERT and CBS_KEY do not hold a PEM client certificate and its key"
+        );
+        assert!(!format!("{:?}", error.trace).contains("not-a-key"));
+        let error = adapter
+            .handle(request(mtls_config(&base, tls_names(true)), input()))
+            .await
+            .expect_err("missing CA");
+        assert_eq!(
+            error.source.to_string(),
+            "connector \"Bureau\": secrets CBS_CERT and CBS_KEY do not hold a PEM client certificate and its key"
+        );
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn env_secrets_read_a_file_when_named() {
+        let path = std::env::temp_dir().join(format!("donka-secret-{}", std::process::id()));
+        std::fs::write(
+            &path,
+            "-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----\n\n",
+        )
+        .unwrap();
+        // SAFETY: the variable name is unique to this test and nothing else reads it.
+        unsafe { std::env::set_var("DONKA_SECRET_CONNECTORS_TEST_CERT_FILE", &path) };
+        assert_eq!(
+            EnvSecrets.get("CONNECTORS_TEST_CERT").as_deref(),
+            Some("-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----")
+        );
+        std::fs::remove_file(path).unwrap();
     }
 }

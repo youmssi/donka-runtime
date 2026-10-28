@@ -15,8 +15,10 @@
 //! re-evaluate it without calling anyone. [`ConnectorAdapter::live`]
 //! (feature `live`, the Runtime) makes the call with a timeout, bounded
 //! retries and a circuit breaker per URL, and reads secret values from its
-//! [`Secrets`]. No secret value ever appears in a node's output, trace or
-//! error.
+//! [`Secrets`]. A call is authenticated with a secret in a header, an OAuth2
+//! client-credentials token, a client certificate (mutual TLS), or a token
+//! over mutual TLS. No secret value, token or key ever appears in a node's
+//! output, trace or error.
 
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -52,6 +54,10 @@ pub struct ConnectorConfig {
     pub url: String,
     #[serde(default)]
     pub auth: Auth,
+    /// A client certificate for mutual TLS, and the CA the service's certificate is checked
+    /// against. Used for the token endpoint too.
+    #[serde(default)]
+    pub tls: Option<ClientTls>,
     /// The request body; string values may be templates over the node's input.
     #[serde(default)]
     pub body: Value,
@@ -75,7 +81,12 @@ pub struct ConnectorConfig {
 
 /// How the call is authenticated. Only the secret's **name** is stored.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum Auth {
     #[default]
     None,
@@ -83,16 +94,57 @@ pub enum Auth {
     Bearer { secret: String },
     /// `<header>: <secret>`, e.g. `X-Api-Key`.
     Header { header: String, secret: String },
+    /// OAuth2 client credentials (RFC 6749 §4.4): a token from `tokenUrl`, asked for with the
+    /// client id and the client secret named `secret`, then sent as a bearer token. The token
+    /// is reused until shortly before it expires, and asked for again once after a `401`.
+    #[serde(rename = "oauth2")]
+    OAuth2 {
+        token_url: String,
+        client_id: String,
+        secret: String,
+        #[serde(default)]
+        scopes: Vec<String>,
+    },
 }
 
 impl Auth {
     fn secret(&self) -> Option<&str> {
         match self {
             Auth::None => None,
-            Auth::Bearer { secret } | Auth::Header { secret, .. } => Some(secret),
+            Auth::Bearer { secret } | Auth::Header { secret, .. } | Auth::OAuth2 { secret, .. } => {
+                Some(secret)
+            }
         }
     }
 }
+
+/// Mutual TLS: the **names** of the secrets holding the client certificate and its key (PEM),
+/// and of the CA bundle the service's certificate must chain to, when it is not a public one.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientTls {
+    pub certificate: String,
+    pub key: String,
+    #[serde(default)]
+    pub ca: Option<String>,
+}
+
+impl ClientTls {
+    fn secrets(&self) -> impl Iterator<Item = &str> {
+        [
+            Some(self.certificate.as_str()),
+            Some(self.key.as_str()),
+            self.ca.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+    }
+}
+
+/// Longest OAuth2 client id accepted.
+pub const MAX_CLIENT_ID: usize = 200;
+/// Most OAuth2 scopes a connector may ask for.
+pub const MAX_SCOPES: usize = 20;
 
 /// What the decision does when the call still fails after its retries.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -128,6 +180,18 @@ pub enum ConnectorError {
     NotJson,
     #[error("the service failed repeatedly; calls are paused for a moment")]
     CircuitOpen,
+    #[error("the token endpoint answered {0}")]
+    TokenStatus(u16),
+    #[error("the token endpoint could not be reached")]
+    TokenUnreachable,
+    #[error("the token endpoint's answer holds no access token")]
+    TokenInvalid,
+    #[error("secrets {0} do not hold a PEM client certificate and its key")]
+    InvalidCertificate(String),
+    #[error("secret {0} does not hold PEM CA certificates")]
+    InvalidCa(String),
+    #[error("the secure connection failed: {0}")]
+    Tls(String),
 }
 
 impl ConnectorError {
@@ -144,6 +208,12 @@ impl ConnectorError {
             ConnectorError::Status(_) => "status",
             ConnectorError::NotJson => "not_json",
             ConnectorError::CircuitOpen => "circuit_open",
+            ConnectorError::TokenStatus(_) => "token_status",
+            ConnectorError::TokenUnreachable => "token_unreachable",
+            ConnectorError::TokenInvalid => "token_invalid",
+            ConnectorError::InvalidCertificate(_) => "invalid_certificate",
+            ConnectorError::InvalidCa(_) => "invalid_ca",
+            ConnectorError::Tls(_) => "tls",
         }
     }
 }
@@ -161,7 +231,7 @@ enum Mode {
     /// Each connector node's output when the decision was made, by node id.
     Replay(HashMap<String, Value>),
     #[cfg(feature = "live")]
-    Live(live::Live),
+    Live(Box<live::Live>),
 }
 
 /// The custom node handler for connector nodes.
@@ -205,16 +275,21 @@ impl ConnectorAdapter {
     #[cfg(feature = "live")]
     pub fn live(limits: Limits, secrets: std::sync::Arc<dyn Secrets>) -> Self {
         Self {
-            mode: Mode::Live(live::Live::new(limits, secrets)),
+            mode: Mode::Live(Box::new(live::Live::new(limits, secrets))),
         }
     }
 
     async fn respond(&self, request: CustomNodeRequest) -> NodeResult {
         let node_id = request.node.id.clone();
+        // The caller only sees the message: it names the connector, as the author named it.
+        let name = match request.node.name.trim() {
+            "" => node_id.to_string(),
+            name => name.to_owned(),
+        };
         let fail = |error: ConnectorError, trace: Option<Value>| NodeError {
             node_id: node_id.clone(),
             trace: trace.map(Variable::from),
-            source: error.to_string().into(),
+            source: format!("connector \"{name}\": {error}").into(),
         };
         if request.node.kind.as_ref() != KIND {
             return Err(fail(
@@ -313,8 +388,13 @@ pub fn parse(config: &Value) -> Result<ConnectorConfig, ConnectorError> {
             "outputKey must be letters, digits and underscores".into(),
         ));
     }
-    if let Some(secret) = config.auth.secret()
-        && !valid_secret_name(secret)
+    let tls_secrets = config.tls.iter().flat_map(ClientTls::secrets);
+    if config
+        .auth
+        .secret()
+        .into_iter()
+        .chain(tls_secrets)
+        .any(|secret| !valid_secret_name(secret))
     {
         return Err(ConnectorError::InvalidConfig(format!(
             "secret names are 1 to {MAX_SECRET_NAME} capital letters, digits and underscores, starting with a letter"
@@ -329,6 +409,38 @@ pub fn parse(config: &Value) -> Result<ConnectorConfig, ConnectorError> {
         return Err(ConnectorError::InvalidConfig(
             "header names are letters, digits and dashes".into(),
         ));
+    }
+    if let Auth::OAuth2 {
+        token_url,
+        client_id,
+        scopes,
+        ..
+    } = &config.auth
+    {
+        if !(token_url.starts_with("https://") || token_url.starts_with("http://")) {
+            return Err(ConnectorError::InvalidConfig(
+                "tokenUrl must start with http:// or https://".into(),
+            ));
+        }
+        if client_id.is_empty()
+            || client_id.chars().count() > MAX_CLIENT_ID
+            || client_id.chars().any(char::is_control)
+        {
+            return Err(ConnectorError::InvalidConfig(format!(
+                "clientId is 1 to {MAX_CLIENT_ID} characters"
+            )));
+        }
+        // RFC 6749 §3.3: printable ASCII except space, double quote and backslash.
+        let scope_char = |c: char| c.is_ascii_graphic() && c != '"' && c != '\\';
+        if scopes.len() > MAX_SCOPES
+            || scopes
+                .iter()
+                .any(|scope| scope.is_empty() || !scope.chars().all(scope_char))
+        {
+            return Err(ConnectorError::InvalidConfig(format!(
+                "scopes are at most {MAX_SCOPES} words without spaces or quotes"
+            )));
+        }
     }
     Ok(config)
 }
