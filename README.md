@@ -52,16 +52,24 @@ Studio published, reloads them the moment they change, and evaluates them with t
 
 ## Quick start
 
-Run it against a MinIO bucket that Studio publishes the `staging` environment to:
+Each release is published as a signed image, `ghcr.io/youmssi/donka-runtime`, with an SBOM and
+a provenance attestation (`edge` follows `develop`). Verify it with the public key `cosign.pub`
+from this repository, without network access to a transparency log:
 
 ```bash
-docker build -t donka-runtime .
+cosign verify --key cosign.pub --insecure-ignore-tlog ghcr.io/youmssi/donka-runtime:latest
+```
+
+Run it against a MinIO bucket that Studio publishes the `staging` environment to (or build it
+yourself with `docker build -t donka-runtime .`):
+
+```bash
 docker run --rm -p 8080:8080 \
   -e PROVIDER__TYPE=S3 -e PROVIDER__BUCKET=donka-releases -e PROVIDER__REGION=us-east-1 \
   -e PROVIDER__ENDPOINT=http://minio:9000 -e PROVIDER__FORCE_PATH_STYLE=true \
   -e PROVIDER__PREFIX=staging/ \
   -e AWS_ACCESS_KEY_ID=... -e AWS_SECRET_ACCESS_KEY=... \
-  donka-runtime
+  ghcr.io/youmssi/donka-runtime:latest
 ```
 
 Then ask for a decision with a token issued in Studio (**Environments → Runtime tokens**):

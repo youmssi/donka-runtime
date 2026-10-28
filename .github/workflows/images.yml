@@ -1,0 +1,138 @@
+name: Images
+
+# The Runtime's published image (DNK-64): ghcr.io/youmssi/donka-runtime.
+#
+# - Every push to develop publishes `edge` and `sha-<commit>`, for staging and demos.
+# - Each release (called by release.yml with its tag) publishes `X.Y.Z`, `X.Y` and `latest`.
+#
+# Every image carries an SBOM and a provenance attestation, and is signed with cosign using
+# the key pair whose public key is `cosign.pub` at the root of this repository. Signatures are
+# not uploaded to the public transparency log, so a bank verifies them without network access:
+#
+#   cosign verify --key cosign.pub --insecure-ignore-tlog ghcr.io/youmssi/donka-runtime:X.Y.Z
+#
+# Signing needs the COSIGN_PRIVATE_KEY and COSIGN_PASSWORD secrets. A release refuses to
+# publish without them; an `edge` image is published unsigned, with a warning.
+
+on:
+  push:
+    branches: [develop]
+  workflow_call:
+    inputs:
+      version:
+        description: The release version, without the leading v (e.g. 1.5.0).
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Publish this version again from its tag (e.g. 1.5.0).
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: images-${{ inputs.version || github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/youmssi/donka-runtime
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version && format('v{0}', inputs.version) || github.sha }}
+
+      - name: Signing key
+        id: key
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          RELEASE: ${{ inputs.version != '' }}
+        run: |
+          if [ -n "$COSIGN_PRIVATE_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          elif [ "$RELEASE" = "true" ]; then
+            echo "::error::COSIGN_PRIVATE_KEY is not set: a release is never published unsigned."
+            exit 1
+          else
+            echo "::warning::COSIGN_PRIVATE_KEY is not set: this edge image is published unsigned."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=edge,enable=${{ inputs.version == '' }}
+            type=sha,prefix=sha-,format=long,enable=${{ inputs.version == '' }}
+            type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=raw,value=latest,enable=${{ inputs.version != '' }}
+          labels: |
+            org.opencontainers.image.title=Donka Runtime
+            org.opencontainers.image.vendor=Donka
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          build-args: SERVICE_VERSION=${{ inputs.version || github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          push: true
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - uses: sigstore/cosign-installer@v3
+        if: steps.key.outputs.present == 'true'
+
+      - name: Sign
+        if: steps.key.outputs.present == 'true'
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cosign sign --yes --key env://COSIGN_PRIVATE_KEY --tlog-upload=false \
+            --recursive "$IMAGE@$DIGEST"
+
+      - name: Verify with the published public key
+        if: steps.key.outputs.present == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          test -f cosign.pub || { echo "::error::cosign.pub is missing from the repository"; exit 1; }
+          cosign verify --key cosign.pub --insecure-ignore-tlog "$IMAGE@$DIGEST" > /dev/null
+
+      - name: Summary
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+          SIGNED: ${{ steps.key.outputs.present }}
+        run: |
+          {
+            echo "### $IMAGE@$DIGEST"
+            echo
+            echo "Signed: $SIGNED"
+            echo
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
