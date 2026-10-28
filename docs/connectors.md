@@ -22,8 +22,9 @@ CONNECTORS__BREAKER_COOLDOWN=30000  # milliseconds before one call is tried agai
 ```
 
 A secret can also be a file: `DONKA_SECRET_<NAME>_FILE` names a file whose content is the value
-(a mounted Docker or Kubernetes secret, a PEM certificate), trailing newlines removed. The variable
-itself wins when both are set.
+(a mounted Docker or Kubernetes secret, a PEM certificate), trailing newlines removed. Setting both
+forms, or a file the Runtime cannot read, stops the Runtime at start
+([secrets as files](configuration.md#secrets-as-files)).
 
 ## Authentication
 

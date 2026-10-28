@@ -3,6 +3,39 @@
 The Runtime reads its settings from environment variables. It listens on `0.0.0.0:8080`
 (`127.0.0.1:3000` in a debug build).
 
+## Secrets as files
+
+Every secret setting `X` can instead be given as `X_FILE`, the path of a file holding the value,
+as Docker and Kubernetes secrets and vault agents (OpenBao, Vault, Infisical) provide them.
+Trailing newlines are removed. Setting both forms, or a file the Runtime cannot read, stops the
+Runtime at start and names the setting.
+
+| Setting | What it holds |
+|---|---|
+| `DECISION_LOG__TOKEN` | the decision-log token Studio issued |
+| `RELEASE_ZIP_PASSWORD` | the password of zipped releases |
+| `PROVIDER__CONNECTION_STRING` | the Azure Storage connection string |
+| `PROVIDER__BASE64_CONTENTS` | the Google Cloud credentials, base64 |
+| `HTTP_SSL__KEY`, `HTTP_SSL__CERT` | the Runtime's own TLS key and certificate, base64 |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | S3 and MinIO credentials |
+| `AZURE_CLIENT_SECRET` | the Azure service principal's secret |
+| `DONKA_SECRET_<NAME>` | a connector secret ([connectors](connectors.md)) |
+
+With Docker secrets, for example:
+
+```yaml
+services:
+  runtime:
+    environment:
+      DECISION_LOG__TOKEN_FILE: /run/secrets/decision_log_token
+    secrets: [decision_log_token]
+secrets:
+  decision_log_token:
+    file: ./secrets/decision_log_token
+```
+
+On Kubernetes, mount the secret as a volume and point `X_FILE` at the file.
+
 ## Release storage
 
 Where the Runtime finds published releases. Donka Studio publishes each environment's releases

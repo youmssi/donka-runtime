@@ -14,6 +14,11 @@ const IS_DEVELOPMENT: bool = cfg!(debug_assertions);
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
+    // Donka: secret settings given as files (`X_FILE`), read before anything else.
+    if let Err(error) = agent::secret_files::load() {
+        eprintln!("Invalid environment variables: {error}");
+        std::process::exit(2);
+    }
 
     let settings = Config::builder()
         .add_source(Environment::default().separator("__").try_parsing(true))
