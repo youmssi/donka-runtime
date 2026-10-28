@@ -31,6 +31,16 @@ the refused request like any failed evaluation.
 Only `POST /api/projects/{project}/evaluate/{key}` adds `contract`; the rules API keeps its own
 error shape.
 
+## Empty values and dates
+
+- `null` in an optional field counts as the field left out: the request passes. A required
+  field must hold a value; `null` there is refused, naming the field.
+- A field declared as a date (`"type": "string"` with `"format": "date"` or `"date-time"`)
+  reaches the rules as a date, so date functions and comparisons work on it. It still reads and
+  answers as the same text.
+
+Both come from zen-engine 2.1 (DNK-62); before it, `null` in any typed field was refused.
+
 ## In the artifact
 
 Studio writes each contract twice: inside the graph's input node, where the engine reads it, and

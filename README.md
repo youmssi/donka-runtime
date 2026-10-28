@@ -10,7 +10,7 @@
     <a href="https://github.com/youmssi/donka-runtime/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/youmssi/donka-runtime/ci.yml?branch=develop&label=CI" alt="CI"/></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/youmssi/donka-runtime" alt="License"/></a>
     <img src="https://img.shields.io/badge/rust-stable-b7410e?logo=rust&logoColor=white" alt="Rust stable"/>
-    <img src="https://img.shields.io/badge/zen--engine-2.0.1-1d4f91" alt="zen-engine 2.0.1"/>
+    <img src="https://img.shields.io/badge/zen--engine-2.1.6-1d4f91" alt="zen-engine 2.1.6"/>
     <a href="Dockerfile"><img src="https://img.shields.io/badge/docker-image-2496ed?logo=docker&logoColor=white" alt="Docker image"/></a>
     <a href="https://github.com/youmssi/donka"><img src="https://img.shields.io/badge/part%20of-Donka-1d4f91" alt="Part of Donka"/></a>
 </p>

@@ -8,6 +8,9 @@ Request and response schemas come from the rule itself when it declares them on
 its input/output nodes. Anything undeclared is derived by analysing the release
 as a single workspace: property references become a nested JSON Schema, and the
 return types of function nodes are resolved by type-checking their TypeScript.
+An expression node's outputs are listed by key; a key whose value the analysis
+cannot type (a field passed through as the caller sent it) is published with an
+open schema (`{}`).
 
 The document is built on the first request for a project and reused until the
 release changes, so only that first request pays for the analysis.

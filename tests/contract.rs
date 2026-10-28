@@ -29,7 +29,8 @@ fn contract() -> Value {
                 "required": ["age"],
                 "properties": { "age": { "type": "integer", "minimum": 18 } }
             },
-            "amount": { "type": "number", "x-donka": { "label": { "en": "Amount", "fr": "Montant" } } }
+            "amount": { "type": "number", "x-donka": { "label": { "en": "Amount", "fr": "Montant" } } },
+            "income": { "type": "number" }
         }
     })
 }
@@ -168,6 +169,28 @@ async fn a_request_within_the_contract_is_answered() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["result"]["approved"], true, "{body}");
+}
+
+/// From zen-engine 2.1 (DNK-62), `null` in an optional field reads as the field left out; a
+/// required field still has to hold a value.
+#[tokio::test]
+async fn null_counts_as_absent_only_for_optional_fields() {
+    let router = router("null").await;
+    let (status, body) = evaluate(
+        &router,
+        json!({ "applicant": { "age": 30 }, "amount": 500, "income": null }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["result"]["approved"], true, "{body}");
+
+    let (status, body) = evaluate(
+        &router,
+        json!({ "applicant": { "age": 30 }, "amount": null }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["contract"]["field"], "amount", "{body}");
 }
 
 #[tokio::test]
