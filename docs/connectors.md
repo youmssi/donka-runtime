@@ -21,6 +21,68 @@ CONNECTORS__BREAKER_FAILURES=5      # consecutive failed calls to one URL that p
 CONNECTORS__BREAKER_COOLDOWN=30000  # milliseconds before one call is tried again
 ```
 
+A secret can also be a file: `DONKA_SECRET_<NAME>_FILE` names a file whose content is the value
+(a mounted Docker or Kubernetes secret, a PEM certificate), trailing newlines removed. The variable
+itself wins when both are set.
+
+## Authentication
+
+A node's `auth` says how the call is authenticated; its optional `tls` adds a client certificate.
+Both hold secret **names** only.
+
+| `auth.type` | What the Runtime sends |
+|---|---|
+| `none` | nothing |
+| `bearer` | `Authorization: Bearer <secret>` |
+| `header` | `<header>: <secret>`, e.g. `X-Api-Key` |
+| `oauth2` | `Authorization: Bearer <token>`, the token from an OAuth2 token endpoint |
+
+### OAuth2 client credentials
+
+```json
+"auth": {
+  "type": "oauth2",
+  "tokenUrl": "https://login.bank.example/oauth2/token",
+  "clientId": "donka-runtime",
+  "secret": "CBS_CLIENT_SECRET",
+  "scopes": ["accounts.read"]
+}
+```
+
+The Runtime asks the token endpoint for a token with the client credentials grant (RFC 6749
+§4.4): client id and secret in HTTP Basic, `scope` the scopes joined by spaces. It keeps the token
+until a tenth of its lifetime before it expires (thirty seconds at most) and shares it between
+calls; a token without `expires_in` is kept until the service refuses it. When the service answers
+`401`, the token is dropped, a new one is asked for and the call is made once more. A token
+endpoint that fails (5xx, 429, timeout, unreachable) counts as a failed attempt: it is retried and
+counts towards the circuit breaker like the call itself; one that refuses the client (4xx) is not
+retried. Tokens never appear in responses, traces or logs.
+
+### Mutual TLS
+
+```json
+"tls": { "certificate": "CBS_CLIENT_CERT", "key": "CBS_CLIENT_KEY", "ca": "CBS_CA" }
+```
+
+```bash
+DONKA_SECRET_CBS_CLIENT_CERT_FILE=/run/secrets/cbs-client.crt   # PEM, its chain may follow
+DONKA_SECRET_CBS_CLIENT_KEY_FILE=/run/secrets/cbs-client.key     # PEM private key
+DONKA_SECRET_CBS_CA_FILE=/run/secrets/cbs-ca.pem                 # PEM CA bundle (optional)
+```
+
+The Runtime presents the client certificate to the service, and to its token endpoint when the
+node also uses `oauth2`. The service's certificate must chain to the CA bundle or to a public CA.
+A certificate the service refuses, or a service certificate the Runtime does not trust, fails the
+call with the reason (`the secure connection failed: received fatal alert: UnknownCA`); secrets
+that hold no PEM certificate and key fail with their names. Key material never appears in an
+error. The client is built at the first call that needs it: restart the Runtime after replacing a
+certificate.
+
+Every failure names the connector as its author named it in the decision:
+`connector "Core banking": the token endpoint answered 503`.
+
+## Retries and the circuit breaker
+
 Server errors (5xx, 429, 408), timeouts and unreachable services are retried with a short
 backoff (100 ms, doubling, at most 1 s); other refusals and non-JSON answers are not. The node's
 trace (`trace: true`) shows the outcome (`ok`, `fallback`, `error`), the attempts, the status and

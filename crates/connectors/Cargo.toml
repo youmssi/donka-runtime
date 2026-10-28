@@ -8,7 +8,7 @@ publish = false
 
 [features]
 # Real HTTP calls (the Runtime). Without it only mock mode exists (Studio's simulator).
-live = ["dep:reqwest", "dep:tokio"]
+live = ["dep:reqwest", "dep:rustls", "dep:tokio"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -17,8 +17,14 @@ thiserror = "2"
 zen-engine = { version = "=2.1.6", features = ["arbitrary_precision"] }
 zen-tmpl = { version = "=2.1.6", features = ["arbitrary_precision"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+# Only to name a failed TLS handshake; reqwest brings the same version.
+rustls = { version = "0.23", default-features = false, optional = true }
 tokio = { version = "1", features = ["time"], optional = true }
 
 [dev-dependencies]
 axum = "0.8"
+hyper-util = { version = "0.1", features = ["server-auto", "service", "tokio"] }
+rcgen = "0.14"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 tokio = { version = "1", features = ["full"] }
