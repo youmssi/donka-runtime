@@ -81,6 +81,24 @@ You can build your own image bundled with rules by doing docker build from our i
 PROVIDER__TYPE=Zip
 ```
 
+### Studio's release folder
+
+When Studio and the Runtime run on one server, they can share a disk volume instead of an S3
+store. Studio publishes to it (`DONKA_STORAGE_URL=file:///var/lib/donka/releases`), one file per
+project under each environment's folder; point the Runtime at its environment's folder and turn
+on `WATCH`:
+
+```bash
+PROVIDER__TYPE=Zip
+PROVIDER__ROOT_DIR=/var/lib/donka/releases/staging
+PROVIDER__WATCH=true          # reload changed files every POLL_INTERVAL (5 s by default)
+```
+
+With `WATCH`, a new deployment is served without a restart, a project whose file disappears is
+no longer served, and a file that is not a valid artifact is skipped (and logged) while the
+others keep serving. Hidden files and files still being written are ignored. Mount the volume
+read-only in the Runtime.
+
 ### MinIO
 ```bash
 PROVIDER__TYPE=S3

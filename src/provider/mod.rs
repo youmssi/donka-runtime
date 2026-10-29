@@ -48,7 +48,7 @@ impl AgentProvider {
 
     fn should_refresh(&self) -> bool {
         match self {
-            AgentProvider::Zip(_) => false,
+            AgentProvider::Zip(zip) => zip.watches(),
             AgentProvider::Filesystem(_) => false,
             AgentProvider::S3(_) => true,
             AgentProvider::AzureStorage(_) => true,

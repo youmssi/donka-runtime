@@ -20,7 +20,7 @@ regularly. The original license and copyright notice in `LICENSE` stay as they a
 | D7 | zen-engine brought to 2.1.6, Runtime first, accepted on replay and scenario evidence (done, DNK-62: `tests/self_reference.rs`, null inputs in `tests/contract.rs`) |
 | D8 | Connectors authenticate with OAuth2 client credentials and mutual TLS (done, DNK-63: `crates/connectors/src/live.rs`) |
 | D9 | Every secret setting also accepted as a file (`_FILE`) (done, DNK-65: `src/secret_files.rs`) |
-| D10 | Published signed images (done, DNK-64: `.github/workflows/images.yml`); the `Filesystem` provider serves a disk volume shared with Studio (planned, DNK-64) |
+| D10 | Published signed images (done, DNK-64: `.github/workflows/images.yml`); the `Zip` provider with `PROVIDER__WATCH` serves and hot-reloads the disk volume Studio publishes to (done, DNK-64: `src/provider/zip.rs`) |
 | D11 | Load test with published latency and throughput targets, checked in CI (planned, DNK-67) |
 | D12 | Image scanning, SLSA provenance, OpenSSF Scorecard, threat model and security contact (planned, DNK-49, DNK-69, DNK-73) |
 | D13 | Batch evaluation of many inputs against one release (Phase 2 candidate, DNK-70) |

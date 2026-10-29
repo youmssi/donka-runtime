@@ -9,6 +9,7 @@ async fn health_test() {
     let config = EnvironmentConfig {
         provider: ProviderConfig::Zip(ZipProviderConfig {
             root_dir: "tests/data".to_string(),
+            watch: false,
         }),
         ..Default::default()
     };
