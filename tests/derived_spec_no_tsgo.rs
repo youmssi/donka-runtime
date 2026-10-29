@@ -11,6 +11,7 @@ async fn document() -> Value {
     let config = EnvironmentConfig {
         provider: ProviderConfig::Zip(ZipProviderConfig {
             root_dir: "tests/data/derived".to_string(),
+            watch: false,
         }),
         tsgo: TsgoConfig {
             enabled: false,

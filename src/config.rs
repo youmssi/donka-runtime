@@ -354,12 +354,17 @@ impl Default for ProviderConfig {
 pub struct ZipProviderConfig {
     #[serde(default = "default_root")]
     pub root_dir: String,
+    /// Donka: reload the folder's artifacts when they change, every poll interval, and read
+    /// Studio's artifacts, which have no `.zip` extension (DNK-64).
+    #[serde(default)]
+    pub watch: bool,
 }
 
 impl Default for ZipProviderConfig {
     fn default() -> Self {
         Self {
             root_dir: default_root(),
+            watch: false,
         }
     }
 }

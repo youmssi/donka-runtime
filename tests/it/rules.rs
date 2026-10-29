@@ -10,6 +10,7 @@ async fn rules_router() -> Router {
     let config = EnvironmentConfig {
         provider: ProviderConfig::Zip(ZipProviderConfig {
             root_dir: "tests/data/rules".to_string(),
+            watch: false,
         }),
         ..Default::default()
     };
