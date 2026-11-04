@@ -22,7 +22,7 @@ regularly. The original license and copyright notice in `LICENSE` stay as they a
 | D9 | Every secret setting also accepted as a file (`_FILE`) (done, DNK-65: `src/secret_files.rs`) |
 | D10 | Published signed images (done, DNK-64: `.github/workflows/images.yml`); the `Zip` provider with `PROVIDER__WATCH` serves and hot-reloads the disk volume Studio publishes to (done, DNK-64: `src/provider/zip.rs`) |
 | D11 | Load test with published latency and throughput targets, checked in CI (planned, DNK-67) |
-| D12 | Image scanning, SLSA provenance, OpenSSF Scorecard, threat model and security contact (planned, DNK-49, DNK-69, DNK-73) |
+| D12 | Coverage, dependency audit and image scanning gates (DNK-49: `.github/workflows/ci.yml`, `.github/workflows/images.yml`); SLSA provenance, OpenSSF Scorecard, threat model and security contact (planned, DNK-69, DNK-73) |
 | D13 | Batch evaluation of many inputs against one release (Phase 2 candidate, DNK-70) |
 | D14 | Releases that take effect at a scheduled time, from the artifact already held (Phase 2 candidate, DNK-78) |
 

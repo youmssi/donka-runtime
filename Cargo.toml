@@ -57,7 +57,7 @@ strum_macros = "0.28"
 itertools = "0.15"
 utoipa = { version = "5", features = ["rc_schema"] }
 utoipa-axum = "0.2"
-utoipa-swagger-ui = { version = "9", features = ["axum"] }
+utoipa-swagger-ui = { version = "10.0.2", features = ["axum"] }
 utoipa-swagger-ui-vendored = "0.1"
 walkdir = "2.5"
 tsgo-wasm = "0.3"
@@ -69,7 +69,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 zen-expression = { version = "=2.1.6", features = ["arbitrary_precision"] }
-zip = { version = "8.6", default-features = false, features = [
+zip = { version = "9", default-features = false, features = [
     "aes-crypto",
     "bzip2",
     "deflate64",
@@ -103,3 +103,11 @@ urlencoding = "2.1.3"
 [profile.release]
 lto = true
 codegen-units = 1
+
+[patch.crates-io]
+# DNK-49: the 2.1.6 engine source with the patched ZIP reader. Keep both server pins identical.
+zen-engine = { git = "https://github.com/youmssi/zen", rev = "04d835fb9c8bb2102244059bb1883e9dd162ede6" }
+zen-expression = { git = "https://github.com/youmssi/zen", rev = "04d835fb9c8bb2102244059bb1883e9dd162ede6" }
+zen-tmpl = { git = "https://github.com/youmssi/zen", rev = "04d835fb9c8bb2102244059bb1883e9dd162ede6" }
+# Same tsgo module and public interface, with patched Wasmtime and WASI.
+tsgo-wasm = { git = "https://github.com/youmssi/tsgo-wasm", rev = "6e49d383b4cd702f99f9098dda5df30a6df4451b" }

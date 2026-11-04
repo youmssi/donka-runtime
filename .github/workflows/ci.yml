@@ -25,7 +25,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.9.1,cargo-audit@0.22.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: Swatinem/rust-cache@v2
       - uses: actions/cache@v4
         with:
@@ -35,8 +41,44 @@ jobs:
       # Upstream code carries existing clippy warnings that we do not rewrite (AGENTS.md §5):
       # warnings are reported, errors fail the build.
       - run: cargo clippy --all-targets --locked
+      - run: node --test scripts/check-rust-coverage.test.mjs
       # tests/it starts MinIO and Azurite containers; GitHub runners provide Docker.
-      - run: cargo test --locked
+      - run: mkdir -p coverage && cargo llvm-cov --workspace --locked --json --output-path coverage/rust.json
+        env:
+          CARGO_PROFILE_DEV_DEBUG: '0'
+          CARGO_PROFILE_TEST_DEBUG: '0'
+          CARGO_INCREMENTAL: '0'
+          CARGO_BUILD_JOBS: '2'
+      - run: node scripts/check-rust-coverage.mjs coverage/rust.json scripts/rust-coverage.json
+      - run: cargo audit
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: runtime-coverage
+          path: coverage/rust.json
+          retention-days: 7
       # Studio builds the connectors crate without its `live` feature (mock mode only).
       - run: cargo clippy -p donka-connectors --all-targets --locked -- -D warnings
       - run: cargo test -p donka-connectors --locked
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          outputs: type=oci,dest=${{ runner.temp }}/runtime-image,tar=false
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.1
+          input: ${{ runner.temp }}/runtime-image
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'

@@ -53,7 +53,8 @@ Studio published, reloads them the moment they change, and evaluates them with t
 ## Quick start
 
 Each release is published as a signed image, `ghcr.io/youmssi/donka-runtime`, with an SBOM and
-a provenance attestation (`edge` follows `develop`). Verify it with the public key `cosign.pub`
+a provenance attestation (`edge` follows `develop`). The publishing workflow scans the built
+image and stops on fixable high or critical findings. Verify it with the public key `cosign.pub`
 from this repository, without network access to a transparency log:
 
 ```bash

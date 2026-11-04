@@ -94,11 +94,35 @@ jobs:
           build-args: SERVICE_VERSION=${{ inputs.version || github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          push: true
+          outputs: type=oci,dest=${{ runner.temp }}/runtime-image,tar=false
           sbom: true
           provenance: mode=max
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.1
+          input: ${{ runner.temp }}/runtime-image
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Publish the scanned index with its attestations
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y skopeo
+          authfile="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
+          while IFS= read -r tag; do
+            skopeo copy --all --preserve-digests --authfile "$authfile" \
+              "oci:$RUNNER_TEMP/runtime-image" "docker://$tag"
+          done <<< "$TAGS"
+          found=$(skopeo inspect --raw --authfile "$authfile" "docker://$IMAGE@$DIGEST" | sha256sum | cut -d' ' -f1)
+          test "sha256:$found" = "$DIGEST"
 
       - uses: sigstore/cosign-installer@v3
         if: steps.key.outputs.present == 'true'

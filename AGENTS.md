@@ -66,12 +66,21 @@ OpenAPI document) are never edited by hand.
 
 ```bash
 cargo fmt --all --check
-cargo clippy --all-targets        # no NEW warnings in code you changed (upstream code has
-                                  # existing lints that we do not rewrite, see §3.4)
-cargo test                        # tests/it needs Docker (MinIO, Azurite containers)
-cargo clippy -p donka-connectors --all-targets -- -D warnings   # mock-only build, as Studio uses it
-cargo test -p donka-connectors
+cargo clippy --all-targets --locked   # no NEW warnings in code you changed (see §3.4)
+mkdir -p coverage
+cargo llvm-cov --workspace --locked --json --output-path coverage/rust.json  # needs Docker for integration tests
+node --test scripts/check-rust-coverage.test.mjs
+node scripts/check-rust-coverage.mjs coverage/rust.json scripts/rust-coverage.json
+cargo audit
+cargo clippy -p donka-connectors --all-targets --locked -- -D warnings  # Studio's mock-only build
+cargo test -p donka-connectors --locked
 ```
+
+The coverage policy requires 70% independently for each named business file/module. Unit
+tests live in companion `tests.rs` files so their own lines cannot inflate the percentage.
+Runtime owns the shared checker; Studio pins its exact public commit. This lets Runtime CI run
+independently of Studio repository access. The Images workflow scans the built OCI index for
+fixable high or critical findings and only then copies it to the registry at the same digest.
 
 Offline or proxied builds: `TSGO_WASM_FILE=/path/tsgo.wasm.zst` and
 `SWAGGER_UI_DOWNLOAD_URL=file:///path/swagger-ui.zip` avoid the build-time downloads.
