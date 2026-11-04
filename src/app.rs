@@ -52,7 +52,10 @@ pub async fn create_app(agent: Agent, config: EnvironmentConfig) -> Router<()> {
         .routes(routes!(routes::infra::health))
         .split_for_parts();
 
-    let mut app = router.merge(SwaggerUi::new("/api/docs").url("/api.json", openapi));
+    // Keep the existing generated API schema across the Swagger adapter's major upgrade.
+    let mut app = router.merge(
+        SwaggerUi::new("/api/docs").external_url_unchecked("/api.json", serde_json::json!(openapi)),
+    );
     if let Some(limiter) = RateLimiter::new(&config.rate_limit) {
         limiter.spawn_cleanup();
         app = app

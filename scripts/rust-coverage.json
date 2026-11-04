@@ -1,0 +1,18 @@
+{
+  "minimumLinePercent": 70,
+  "modules": [
+    "crates/connectors/src",
+    "src/contract.rs",
+    "src/data",
+    "src/decision_log.rs",
+    "src/engine_ext.rs",
+    "src/immutable_loader.rs",
+    "src/rate_limit.rs",
+    "src/rules_spec.rs",
+    "src/schema.rs",
+    "src/spec_derive.rs",
+    "src/secret_files.rs",
+    "src/provider/zip.rs",
+    "src/util"
+  ]
+}
