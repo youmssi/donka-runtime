@@ -105,9 +105,10 @@ lto = true
 codegen-units = 1
 
 [patch.crates-io]
-# DNK-49: the 2.1.6 engine source with the patched ZIP reader. Keep both server pins identical.
-zen-engine = { git = "https://github.com/youmssi/zen", rev = "04d835fb9c8bb2102244059bb1883e9dd162ede6" }
-zen-expression = { git = "https://github.com/youmssi/zen", rev = "04d835fb9c8bb2102244059bb1883e9dd162ede6" }
-zen-tmpl = { git = "https://github.com/youmssi/zen", rev = "04d835fb9c8bb2102244059bb1883e9dd162ede6" }
+# DNK-49: the 2.1.6 engine source with the patched ZIP reader; DNK-83: the switch that keeps
+# function nodes off the network. Keep both server pins identical.
+zen-engine = { git = "https://github.com/youmssi/zen", rev = "295fdfac546bd01cf4cbbb2b64c5c0e17d7e2a15" }
+zen-expression = { git = "https://github.com/youmssi/zen", rev = "295fdfac546bd01cf4cbbb2b64c5c0e17d7e2a15" }
+zen-tmpl = { git = "https://github.com/youmssi/zen", rev = "295fdfac546bd01cf4cbbb2b64c5c0e17d7e2a15" }
 # Same tsgo module and public interface, with patched Wasmtime and WASI.
 tsgo-wasm = { git = "https://github.com/youmssi/tsgo-wasm", rev = "6e49d383b4cd702f99f9098dda5df30a6df4451b" }
