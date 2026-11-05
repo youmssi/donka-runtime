@@ -10,6 +10,7 @@ use axum::http::{HeaderMap, Request, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 use tower::ServiceExt;
@@ -88,6 +89,8 @@ async fn router(root: PathBuf) -> Router {
         }),
         connectors: ConnectorsConfig {
             timeout: Duration::from_millis(500),
+            allowed_hosts: vec!["127.0.0.1".to_owned()],
+            hosts: HashMap::from([("BUREAU_KEY".to_owned(), vec!["127.0.0.1".to_owned()])]),
             ..Default::default()
         },
         ..Default::default()

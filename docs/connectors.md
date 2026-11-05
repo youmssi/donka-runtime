@@ -23,7 +23,31 @@ CONNECTORS__RETRIES=1               # attempts after the first one when the node
 CONNECTORS__MAX_RETRIES=3           # the most a node may ask for
 CONNECTORS__BREAKER_FAILURES=5      # consecutive failed calls to one URL that pause calls to it
 CONNECTORS__BREAKER_COOLDOWN=30000  # milliseconds before one call is tried again
+CONNECTORS__ALLOWED_HOSTS=api.bureau.cm,cbs.bank.internal:8443   # hosts any connector may call
+CONNECTORS__HOSTS__BUREAU_KEY=api.bureau.cm                       # hosts each secret may go to
 ```
+
+## Where calls may go
+
+A connector calls only the hosts the installation lists, and sends a secret only to the hosts
+listed for that secret. This holds whatever URL a rule author writes, so a release cannot send a
+secret, or a request, anywhere else (DNK-84):
+
+- `CONNECTORS__ALLOWED_HOSTS`: every host a connector may call, comma-separated. Empty, the
+  default, refuses every call.
+- `CONNECTORS__HOSTS__<SECRET>`: the hosts `<SECRET>` may be sent to. A secret without a list
+  is never sent. For OAuth2, the token endpoint's host is checked for the client secret, and the
+  service's host too: list both. For mutual TLS, the certificate, key and CA secrets each need
+  the service's host (and the token endpoint's, when there is one).
+- An entry is a host name, which allows any port, or `host:port`; case does not matter.
+
+A refused call is checked before any secret is read or anything is sent. It fails, or falls
+back, with `host_not_allowed` or `secret_host_not_allowed`, and the message names the setting
+to add. `donka-admin init` writes these lists for the connectors it configures, and
+`donka-admin doctor` reports a secret without one.
+
+Connectors never follow a redirect, which could carry a secret header to another host. A
+`3xx` answer is the connector's error (`redirect`).
 
 A secret can also be a file: `DONKA_SECRET_<NAME>_FILE` names a file whose content is the value
 (a mounted Docker or Kubernetes secret, a PEM certificate), trailing newlines removed. Setting both

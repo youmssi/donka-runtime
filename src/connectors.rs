@@ -4,7 +4,7 @@
 //! survives release reloads. Other custom node kinds keep upstream behaviour.
 
 use crate::config::ConnectorsConfig;
-use donka_connectors::{ConnectorAdapter, EnvSecrets, KIND, Limits};
+use donka_connectors::{ConnectorAdapter, Destinations, EnvSecrets, KIND, Limits};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
@@ -52,6 +52,13 @@ fn handler(config: &ConnectorsConfig) -> DynamicCustomNode {
         breaker_cooldown: config.breaker_cooldown,
     };
     Arc::new(Nodes {
-        connectors: ConnectorAdapter::live(limits, Arc::new(EnvSecrets)),
+        connectors: ConnectorAdapter::live(
+            limits,
+            Destinations {
+                hosts: config.allowed_hosts.clone(),
+                secrets: config.hosts.clone(),
+            },
+            Arc::new(EnvSecrets),
+        ),
     })
 }

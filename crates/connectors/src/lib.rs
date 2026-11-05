@@ -33,7 +33,7 @@ use zen_engine::nodes::{NodeError, NodeResponse, NodeResult};
 #[cfg(feature = "live")]
 mod live;
 #[cfg(feature = "live")]
-pub use live::{EnvSecrets, Limits, Secrets};
+pub use live::{Destinations, EnvSecrets, Limits, Secrets};
 
 /// The custom node kind connectors use in a decision graph.
 pub const KIND: &str = "donka.connector";
@@ -192,6 +192,12 @@ pub enum ConnectorError {
     InvalidCa(String),
     #[error("the secure connection failed: {0}")]
     Tls(String),
+    #[error("the Runtime does not allow connector calls to {0} (CONNECTORS__ALLOWED_HOSTS)")]
+    HostNotAllowed(String),
+    #[error("secret {secret} may not be sent to {host} (CONNECTORS__HOSTS__{secret})")]
+    SecretHostNotAllowed { secret: String, host: String },
+    #[error("the service redirected the call ({0}); connectors do not follow redirects")]
+    Redirect(u16),
 }
 
 impl ConnectorError {
@@ -214,6 +220,9 @@ impl ConnectorError {
             ConnectorError::InvalidCertificate(_) => "invalid_certificate",
             ConnectorError::InvalidCa(_) => "invalid_ca",
             ConnectorError::Tls(_) => "tls",
+            ConnectorError::HostNotAllowed(_) => "host_not_allowed",
+            ConnectorError::SecretHostNotAllowed { .. } => "secret_host_not_allowed",
+            ConnectorError::Redirect(_) => "redirect",
         }
     }
 }
@@ -271,11 +280,16 @@ impl ConnectorAdapter {
         }
     }
 
-    /// Calls the services for real, within `limits`, with secret values from `secrets`.
+    /// Calls the services for real, within `limits`, only to the hosts `destinations` allows,
+    /// with secret values from `secrets`.
     #[cfg(feature = "live")]
-    pub fn live(limits: Limits, secrets: std::sync::Arc<dyn Secrets>) -> Self {
+    pub fn live(
+        limits: Limits,
+        destinations: Destinations,
+        secrets: std::sync::Arc<dyn Secrets>,
+    ) -> Self {
         Self {
-            mode: Mode::Live(Box::new(live::Live::new(limits, secrets))),
+            mode: Mode::Live(Box::new(live::Live::new(limits, destinations, secrets))),
         }
     }
 
