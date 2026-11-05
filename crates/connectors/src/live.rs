@@ -1,7 +1,9 @@
 //! Real calls: timeout per attempt, bounded retries with backoff, and a
 //! circuit breaker per URL so a failing service is not hammered.
 
-use crate::{Auth, CallReport, ClientTls, ConnectorConfig, ConnectorError, SECRET_ENV_PREFIX};
+use crate::{
+    Auth, CallReport, ClientTls, ConnectorConfig, ConnectorError, Destinations, SECRET_ENV_PREFIX,
+};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -57,60 +59,6 @@ impl Default for Limits {
             breaker_failures: 5,
             breaker_cooldown: Duration::from_secs(30),
         }
-    }
-}
-
-/// Where calls may go, whatever the node asks for: every host a connector calls must be in
-/// `hosts`, and every secret a call uses may only go to the hosts listed for it. A secret
-/// without a list is never sent. An entry is a host name (any port) or `host:port`, compared
-/// without regard to case.
-#[derive(Debug, Clone, Default)]
-pub struct Destinations {
-    pub hosts: Vec<String>,
-    pub secrets: HashMap<String, Vec<String>>,
-}
-
-impl Destinations {
-    /// Refuses `url` unless its host is allowed for every call and for each of `secrets`.
-    fn check<'a>(
-        &self,
-        url: &str,
-        secrets: impl IntoIterator<Item = &'a str>,
-    ) -> Result<(), ConnectorError> {
-        let parsed = reqwest::Url::parse(url)
-            .map_err(|_| ConnectorError::InvalidConfig(format!("{url} is not a URL")))?;
-        let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
-        let port = parsed.port_or_known_default();
-        let listed = |entries: &[String]| entries.iter().any(|entry| matches(entry, &host, port));
-        if !listed(&self.hosts) {
-            return Err(ConnectorError::HostNotAllowed(host));
-        }
-        for secret in secrets {
-            let entries = self
-                .secrets
-                .iter()
-                .find(|(name, _)| name.eq_ignore_ascii_case(secret))
-                .map(|(_, entries)| entries.as_slice())
-                .unwrap_or_default();
-            if !listed(entries) {
-                return Err(ConnectorError::SecretHostNotAllowed {
-                    secret: secret.to_owned(),
-                    host,
-                });
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Whether `entry` (`host` or `host:port`) names `host` and `port`.
-fn matches(entry: &str, host: &str, port: Option<u16>) -> bool {
-    let entry = entry.trim().to_ascii_lowercase();
-    match entry.rsplit_once(':') {
-        Some((name, wanted)) if wanted.parse::<u16>().is_ok() => {
-            name == host && port == wanted.parse().ok()
-        }
-        _ => entry == host,
     }
 }
 
@@ -192,28 +140,7 @@ impl Live {
         let mut report = CallReport::default();
         let started = Instant::now();
         // Nothing is read or sent before every destination is allowed for the secrets it gets.
-        let tls_secrets: Vec<&str> = config.tls.iter().flat_map(ClientTls::secrets).collect();
-        let mut allowed = self.destinations.check(
-            &config.url,
-            config
-                .auth
-                .secret()
-                .into_iter()
-                .chain(tls_secrets.iter().copied()),
-        );
-        if let (
-            Ok(()),
-            Auth::OAuth2 {
-                token_url, secret, ..
-            },
-        ) = (&allowed, &config.auth)
-        {
-            allowed = self.destinations.check(
-                token_url,
-                std::iter::once(secret.as_str()).chain(tls_secrets.iter().copied()),
-            );
-        }
-        if let Err(error) = allowed {
+        if let Err(error) = self.destinations.check(config) {
             return (Err(error), report);
         }
         let prepared = self.credentials(&config.auth).and_then(|credentials| {

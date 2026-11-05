@@ -33,7 +33,7 @@ use zen_engine::nodes::{NodeError, NodeResponse, NodeResult};
 #[cfg(feature = "live")]
 mod live;
 #[cfg(feature = "live")]
-pub use live::{Destinations, EnvSecrets, Limits, Secrets};
+pub use live::{EnvSecrets, Limits, Secrets};
 
 /// The custom node kind connectors use in a decision graph.
 pub const KIND: &str = "donka.connector";
@@ -138,6 +138,78 @@ impl ClientTls {
         ]
         .into_iter()
         .flatten()
+    }
+}
+
+/// Where calls may go, whatever the node asks for (DNK-84): every host a connector calls must be
+/// in `hosts`, and every secret a call uses may only go to the hosts listed for it. A secret
+/// without a list is never sent. An entry is a host name (any port) or `host:port`, compared
+/// without regard to case. The Runtime enforces it before each call; Studio uses the same check
+/// to warn about connectors the installation would refuse.
+#[derive(Debug, Clone, Default)]
+pub struct Destinations {
+    pub hosts: Vec<String>,
+    pub secrets: HashMap<String, Vec<String>>,
+}
+
+impl Destinations {
+    /// Refuses `config` unless its service, and its token endpoint when it uses OAuth2, are
+    /// allowed for every call and for each secret sent there.
+    pub fn check(&self, config: &ConnectorConfig) -> Result<(), ConnectorError> {
+        let tls: Vec<&str> = config.tls.iter().flat_map(ClientTls::secrets).collect();
+        let service = config.auth.secret().into_iter();
+        self.check_url(&config.url, service.chain(tls.iter().copied()))?;
+        if let Auth::OAuth2 {
+            token_url, secret, ..
+        } = &config.auth
+        {
+            self.check_url(
+                token_url,
+                std::iter::once(secret.as_str()).chain(tls.iter().copied()),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn check_url<'a>(
+        &self,
+        url: &str,
+        secrets: impl IntoIterator<Item = &'a str>,
+    ) -> Result<(), ConnectorError> {
+        let parsed = url::Url::parse(url)
+            .map_err(|_| ConnectorError::InvalidConfig(format!("{url} is not a URL")))?;
+        let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+        let port = parsed.port_or_known_default();
+        let listed = |entries: &[String]| entries.iter().any(|entry| matches(entry, &host, port));
+        if !listed(&self.hosts) {
+            return Err(ConnectorError::HostNotAllowed(host));
+        }
+        for secret in secrets {
+            let entries = self
+                .secrets
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(secret))
+                .map(|(_, entries)| entries.as_slice())
+                .unwrap_or_default();
+            if !listed(entries) {
+                return Err(ConnectorError::SecretHostNotAllowed {
+                    secret: secret.to_owned(),
+                    host,
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Whether `entry` (`host` or `host:port`) names `host` and `port`.
+fn matches(entry: &str, host: &str, port: Option<u16>) -> bool {
+    let entry = entry.trim().to_ascii_lowercase();
+    match entry.rsplit_once(':') {
+        Some((name, wanted)) if wanted.parse::<u16>().is_ok() => {
+            name == host && port == wanted.parse().ok()
+        }
+        _ => entry == host,
     }
 }
 

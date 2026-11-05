@@ -274,6 +274,74 @@ async fn a_traced_decision_replays_to_the_same_result_whatever_the_mock() {
     assert_eq!(replayed.result.to_value(), made.result.to_value());
 }
 
+#[test]
+fn destinations_allow_a_connector_only_toward_listed_hosts_for_its_secrets() {
+    let destinations = Destinations {
+        hosts: vec!["api.bureau.cm".to_owned(), "login.bank:8443".to_owned()],
+        secrets: HashMap::from([
+            ("BUREAU_KEY".to_owned(), vec!["API.BUREAU.CM".to_owned()]),
+            ("CBS_SECRET".to_owned(), vec!["api.bureau.cm".to_owned()]),
+        ]),
+    };
+    let node = |config: Value| parse(&config).expect("valid settings");
+    let bureau = node(json!({
+        "url": "https://api.bureau.cm/score",
+        "auth": { "type": "header", "header": "X-Api-Key", "secret": "BUREAU_KEY" },
+        "outputKey": "bureau"
+    }));
+    assert!(destinations.check(&bureau).is_ok());
+
+    let elsewhere = node(json!({ "url": "https://attacker.example/x", "outputKey": "bureau" }));
+    assert_eq!(
+        destinations.check(&elsewhere).unwrap_err().code(),
+        "host_not_allowed"
+    );
+
+    let unlisted_secret = node(json!({
+        "url": "https://api.bureau.cm/score",
+        "auth": { "type": "bearer", "secret": "OTHER_KEY" },
+        "outputKey": "bureau"
+    }));
+    assert_eq!(
+        destinations
+            .check(&unlisted_secret)
+            .unwrap_err()
+            .to_string(),
+        "secret OTHER_KEY may not be sent to api.bureau.cm (CONNECTORS__HOSTS__OTHER_KEY)"
+    );
+
+    // The token endpoint is listed for every call, not for this client secret.
+    let oauth = node(json!({
+        "url": "https://api.bureau.cm/score",
+        "auth": {
+            "type": "oauth2", "tokenUrl": "https://login.bank:8443/token",
+            "clientId": "donka", "secret": "CBS_SECRET"
+        },
+        "outputKey": "bureau"
+    }));
+    assert_eq!(
+        destinations.check(&oauth).unwrap_err().to_string(),
+        "secret CBS_SECRET may not be sent to login.bank (CONNECTORS__HOSTS__CBS_SECRET)"
+    );
+
+    // A port in the list must match the URL's, the scheme's default included.
+    let wrong_port = node(json!({ "url": "https://login.bank/token", "outputKey": "x" }));
+    assert_eq!(
+        destinations.check(&wrong_port).unwrap_err().code(),
+        "host_not_allowed"
+    );
+
+    let certificate = node(json!({
+        "url": "https://api.bureau.cm/score",
+        "tls": { "certificate": "CERT", "key": "KEY" },
+        "outputKey": "bureau"
+    }));
+    assert_eq!(
+        destinations.check(&certificate).unwrap_err().code(),
+        "secret_host_not_allowed"
+    );
+}
+
 #[cfg(feature = "live")]
 mod live {
     use super::*;
