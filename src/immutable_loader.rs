@@ -7,14 +7,15 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Component;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use crate::data::extended_decision::{FileContent, FileDecisionGraph, FileTestContent};
 use crate::data::release_data::ReleaseData;
 use crate::rules_spec::{RuleKind, SpecEntry, SpecExample};
 use anyhow::anyhow;
-use zen_engine::DecisionEngine;
 use zen_engine::loader::{DecisionLoader, LoaderError, LoaderResponse};
 use zen_engine::model::{DecisionContent, DecisionNodeKind};
+use zen_engine::{DecisionEngine, ZEN_CONFIG};
 use zip::ZipArchive;
 use zip::read::ZipFile;
 use zip::result::ZipResult;
@@ -40,6 +41,11 @@ impl ImmutableLoader {
     }
 
     pub fn into_engine(self) -> DecisionEngine {
+        // Donka: rules reach other systems only through connectors. Function nodes get no HTTP
+        // client and the engine attaches no cloud credentials (DNK-83); the setting is
+        // process-wide.
+        ZEN_CONFIG.http_native.store(false, Ordering::Relaxed);
+        ZEN_CONFIG.http_auth.store(false, Ordering::Relaxed);
         DecisionEngine::default()
             .with_loader(Arc::new(self))
             .with_adapter(crate::connectors::adapter())

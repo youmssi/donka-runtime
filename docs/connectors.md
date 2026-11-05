@@ -7,6 +7,10 @@ POSTs the node's JSON body (string values may be templates over the node's input
 When the call still fails after its retries, the node either fails the evaluation or continues
 with the `fallback` the author defined (`onError`).
 
+Connectors are the only way a decision reaches another system. JavaScript function nodes have no
+network access: importing `http` and calling any address fails the evaluation with
+`HTTP requests from function nodes are disabled`, before any connection is made (DNK-83).
+
 Secrets never travel in the artifact: a node names its secret (`BUREAU_KEY`) and the Runtime
 reads the value from `DONKA_SECRET_<NAME>`. A missing secret fails the call and names the
 secret, never a value. Values never appear in responses, traces or logs.
