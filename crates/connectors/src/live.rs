@@ -1,7 +1,9 @@
 //! Real calls: timeout per attempt, bounded retries with backoff, and a
 //! circuit breaker per URL so a failing service is not hammered.
 
-use crate::{Auth, CallReport, ClientTls, ConnectorConfig, ConnectorError, SECRET_ENV_PREFIX};
+use crate::{
+    Auth, CallReport, ClientTls, ConnectorConfig, ConnectorError, Destinations, SECRET_ENV_PREFIX,
+};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -60,6 +62,11 @@ impl Default for Limits {
     }
 }
 
+/// Connector clients never follow a redirect: it could carry a secret header to another host.
+fn client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder().redirect(reqwest::redirect::Policy::none())
+}
+
 /// Wait before retry `n` (from 1): 100 ms, 200 ms, 400 ms… up to one second.
 fn backoff(retry: u32) -> Duration {
     Duration::from_millis((100u64 << retry.saturating_sub(1).min(4)).min(1000))
@@ -89,6 +96,7 @@ pub(crate) struct Live {
     tokens: Mutex<HashMap<TokenKey, Token>>,
     secrets: Arc<dyn Secrets>,
     limits: Limits,
+    destinations: Destinations,
     breakers: Mutex<HashMap<String, Breaker>>,
 }
 
@@ -106,13 +114,20 @@ enum Credentials {
 type Attempt = (Result<Value, ConnectorError>, bool);
 
 impl Live {
-    pub(crate) fn new(limits: Limits, secrets: Arc<dyn Secrets>) -> Self {
+    pub(crate) fn new(
+        limits: Limits,
+        destinations: Destinations,
+        secrets: Arc<dyn Secrets>,
+    ) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: client_builder()
+                .build()
+                .expect("a client without settings builds"),
             tls_clients: Mutex::new(HashMap::new()),
             tokens: Mutex::new(HashMap::new()),
             secrets,
             limits,
+            destinations,
             breakers: Mutex::new(HashMap::new()),
         }
     }
@@ -124,6 +139,10 @@ impl Live {
     ) -> (Result<Value, ConnectorError>, CallReport) {
         let mut report = CallReport::default();
         let started = Instant::now();
+        // Nothing is read or sent before every destination is allowed for the secrets it gets.
+        if let Err(error) = self.destinations.check(config) {
+            return (Err(error), report);
+        }
         let prepared = self.credentials(&config.auth).and_then(|credentials| {
             let client = match &config.tls {
                 Some(tls) => self.tls_client(tls)?,
@@ -214,6 +233,9 @@ impl Live {
                 renewed = true;
                 continue;
             }
+            if status.is_redirection() {
+                return (Err(ConnectorError::Redirect(status.as_u16())), false);
+            }
             if status.is_success() {
                 return match response.json::<Value>().await {
                     Ok(value) => (Ok(value), false),
@@ -273,6 +295,9 @@ impl Live {
             }
         };
         let status = response.status();
+        if status.is_redirection() {
+            return Err((Err(ConnectorError::Redirect(status.as_u16())), false));
+        }
         if !status.is_success() {
             return Err((
                 Err(ConnectorError::TokenStatus(status.as_u16())),
@@ -362,7 +387,7 @@ impl Live {
         // A PEM bundle: the certificate (and its chain), then the private key.
         let identity = reqwest::Identity::from_pem(format!("{certificate}\n{key}").as_bytes())
             .map_err(|_| invalid())?;
-        let mut builder = reqwest::Client::builder().identity(identity);
+        let mut builder = client_builder().identity(identity);
         if let Some(ca) = &tls.ca {
             let bundle = self.secret(ca)?;
             let roots = reqwest::Certificate::from_pem_bundle(bundle.as_bytes())

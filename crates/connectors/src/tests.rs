@@ -274,6 +274,74 @@ async fn a_traced_decision_replays_to_the_same_result_whatever_the_mock() {
     assert_eq!(replayed.result.to_value(), made.result.to_value());
 }
 
+#[test]
+fn destinations_allow_a_connector_only_toward_listed_hosts_for_its_secrets() {
+    let destinations = Destinations {
+        hosts: vec!["api.bureau.cm".to_owned(), "login.bank:8443".to_owned()],
+        secrets: HashMap::from([
+            ("BUREAU_KEY".to_owned(), vec!["API.BUREAU.CM".to_owned()]),
+            ("CBS_SECRET".to_owned(), vec!["api.bureau.cm".to_owned()]),
+        ]),
+    };
+    let node = |config: Value| parse(&config).expect("valid settings");
+    let bureau = node(json!({
+        "url": "https://api.bureau.cm/score",
+        "auth": { "type": "header", "header": "X-Api-Key", "secret": "BUREAU_KEY" },
+        "outputKey": "bureau"
+    }));
+    assert!(destinations.check(&bureau).is_ok());
+
+    let elsewhere = node(json!({ "url": "https://attacker.example/x", "outputKey": "bureau" }));
+    assert_eq!(
+        destinations.check(&elsewhere).unwrap_err().code(),
+        "host_not_allowed"
+    );
+
+    let unlisted_secret = node(json!({
+        "url": "https://api.bureau.cm/score",
+        "auth": { "type": "bearer", "secret": "OTHER_KEY" },
+        "outputKey": "bureau"
+    }));
+    assert_eq!(
+        destinations
+            .check(&unlisted_secret)
+            .unwrap_err()
+            .to_string(),
+        "secret OTHER_KEY may not be sent to api.bureau.cm (CONNECTORS__HOSTS__OTHER_KEY)"
+    );
+
+    // The token endpoint is listed for every call, not for this client secret.
+    let oauth = node(json!({
+        "url": "https://api.bureau.cm/score",
+        "auth": {
+            "type": "oauth2", "tokenUrl": "https://login.bank:8443/token",
+            "clientId": "donka", "secret": "CBS_SECRET"
+        },
+        "outputKey": "bureau"
+    }));
+    assert_eq!(
+        destinations.check(&oauth).unwrap_err().to_string(),
+        "secret CBS_SECRET may not be sent to login.bank (CONNECTORS__HOSTS__CBS_SECRET)"
+    );
+
+    // A port in the list must match the URL's, the scheme's default included.
+    let wrong_port = node(json!({ "url": "https://login.bank/token", "outputKey": "x" }));
+    assert_eq!(
+        destinations.check(&wrong_port).unwrap_err().code(),
+        "host_not_allowed"
+    );
+
+    let certificate = node(json!({
+        "url": "https://api.bureau.cm/score",
+        "tls": { "certificate": "CERT", "key": "KEY" },
+        "outputKey": "bureau"
+    }));
+    assert_eq!(
+        destinations.check(&certificate).unwrap_err().code(),
+        "secret_host_not_allowed"
+    );
+}
+
 #[cfg(feature = "live")]
 mod live {
     use super::*;
@@ -377,6 +445,17 @@ mod live {
                     ),
                 )
                 .route(
+                    "/moved",
+                    post(
+                        |State(seen): State<Arc<Seen>>,
+                         headers: HeaderMap,
+                         Json(body): Json<Value>| async move {
+                            note(&seen, headers, body).await;
+                            (StatusCode::TEMPORARY_REDIRECT, [("location", "/score")])
+                        },
+                    ),
+                )
+                .route(
                     "/slow",
                     post(
                         |State(seen): State<Arc<Seen>>,
@@ -403,12 +482,39 @@ mod live {
         }
     }
 
+    /// Every secret name the tests use, allowed to the local test services only.
+    fn local() -> Destinations {
+        let hosts = vec!["127.0.0.1".to_owned(), "localhost".to_owned()];
+        let names = [
+            "BUREAU_KEY",
+            "OTHER_KEY",
+            "KEY",
+            "C",
+            "K",
+            "CBS_CERT",
+            "CBS_KEY",
+            "CBS_CA",
+            "CBS_CLIENT_SECRET",
+        ];
+        Destinations {
+            hosts: hosts.clone(),
+            secrets: names
+                .iter()
+                .map(|name| ((*name).to_owned(), hosts.clone()))
+                .collect(),
+        }
+    }
+
     fn adapter(limits: Limits) -> ConnectorAdapter {
+        adapter_to(limits, local())
+    }
+
+    fn adapter_to(limits: Limits, destinations: Destinations) -> ConnectorAdapter {
         let secrets = Fixed(HashMap::from([(
             "BUREAU_KEY".to_owned(),
             SECRET.to_owned(),
         )]));
-        ConnectorAdapter::live(limits, Arc::new(secrets))
+        ConnectorAdapter::live(limits, destinations, Arc::new(secrets))
     }
 
     fn config(url: String, extra: Value) -> Value {
@@ -644,6 +750,172 @@ mod live {
         assert_eq!(fake.hits(), 0);
     }
 
+    // ----- Where calls may go (DNK-84) ------------------------------------------
+
+    fn error_code(response: NodeResponse) -> Value {
+        response.trace_data.unwrap().to_value()["error"].clone()
+    }
+
+    #[tokio::test]
+    async fn a_host_outside_the_installation_list_is_refused_before_any_call() {
+        let fake = fake().await;
+        let destinations = Destinations {
+            hosts: vec!["api.bureau.example".to_owned()],
+            ..local()
+        };
+        let response = adapter_to(Limits::default(), destinations)
+            .handle(request(
+                config(fake.url("/score"), json!({ "onError": "fallback" })),
+                input(),
+            ))
+            .await
+            .expect("falls back");
+        assert_eq!(
+            error_code(response),
+            json!({ "code": "host_not_allowed", "message": "the Runtime does not allow connector calls to 127.0.0.1 (CONNECTORS__ALLOWED_HOSTS)" })
+        );
+        assert_eq!(fake.hits(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_secret_goes_only_to_its_hosts_and_without_a_list_nowhere() {
+        let fake = fake().await;
+        let elsewhere = Destinations {
+            secrets: HashMap::from([(
+                "BUREAU_KEY".to_owned(),
+                vec!["api.bureau.example".to_owned()],
+            )]),
+            ..local()
+        };
+        let unlisted = Destinations {
+            secrets: HashMap::new(),
+            ..local()
+        };
+        for destinations in [elsewhere, unlisted] {
+            let response = adapter_to(Limits::default(), destinations)
+                .handle(request(
+                    config(fake.url("/score"), json!({ "onError": "fallback" })),
+                    input(),
+                ))
+                .await
+                .expect("falls back");
+            assert_eq!(
+                error_code(response),
+                json!({ "code": "secret_host_not_allowed", "message": "secret BUREAU_KEY may not be sent to 127.0.0.1 (CONNECTORS__HOSTS__BUREAU_KEY)" })
+            );
+        }
+        assert_eq!(fake.hits(), 0);
+    }
+
+    #[tokio::test]
+    async fn hosts_match_without_case_and_with_or_without_a_port() {
+        let fake = fake().await;
+        let port = fake.base.rsplit(':').next().unwrap().to_owned();
+        for (host, allowed) in [
+            ("127.0.0.1".to_owned(), true),
+            (format!("127.0.0.1:{port}"), true),
+            ("127.0.0.1:1".to_owned(), false),
+        ] {
+            let destinations = Destinations {
+                hosts: vec![host.to_uppercase()],
+                secrets: HashMap::from([("BUREAU_KEY".to_owned(), vec![host.clone()])]),
+            };
+            let result = adapter_to(Limits::default(), destinations)
+                .handle(request(config(fake.url("/score"), json!({})), input()))
+                .await;
+            assert_eq!(result.is_ok(), allowed, "{host}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_oauth2_client_secret_goes_only_to_an_allowed_token_endpoint() {
+        let (base, issuer) = issuer().await;
+        // The service on 127.0.0.1, its token endpoint reached as localhost.
+        let mut node = oauth_config(&base, json!({ "onError": "fallback" }));
+        node["auth"]["tokenUrl"] =
+            json!(format!("{}/token", base.replace("127.0.0.1", "localhost")));
+        let secrets = || {
+            Arc::new(Fixed(HashMap::from([(
+                "CBS_CLIENT_SECRET".to_owned(),
+                CLIENT_SECRET.to_owned(),
+            )])))
+        };
+        let both = vec!["127.0.0.1".to_owned(), "localhost".to_owned()];
+        let service_only = Destinations {
+            hosts: both.clone(),
+            secrets: HashMap::from([(
+                "CBS_CLIENT_SECRET".to_owned(),
+                vec!["127.0.0.1".to_owned()],
+            )]),
+        };
+        let response = ConnectorAdapter::live(Limits::default(), service_only, secrets())
+            .handle(request(node.clone(), input()))
+            .await
+            .expect("falls back");
+        assert_eq!(
+            error_code(response),
+            json!({ "code": "secret_host_not_allowed", "message": "secret CBS_CLIENT_SECRET may not be sent to localhost (CONNECTORS__HOSTS__CBS_CLIENT_SECRET)" })
+        );
+        assert_eq!(issuer.token_hits.load(Ordering::SeqCst), 0);
+        assert_eq!(issuer.api_hits.load(Ordering::SeqCst), 0);
+
+        let both_allowed = Destinations {
+            hosts: both.clone(),
+            secrets: HashMap::from([("CBS_CLIENT_SECRET".to_owned(), both)]),
+        };
+        let response = ConnectorAdapter::live(Limits::default(), both_allowed, secrets())
+            .handle(request(node, input()))
+            .await
+            .expect("response");
+        assert_eq!(
+            response.output.to_value()["bureau"],
+            json!({ "score": 700 })
+        );
+    }
+
+    #[tokio::test]
+    async fn client_certificate_secrets_go_only_to_their_hosts() {
+        let fake = fake().await;
+        let node = config(
+            fake.url("/score"),
+            json!({ "auth": { "type": "none" }, "tls": { "certificate": "C", "key": "K" }, "onError": "fallback" }),
+        );
+        let mut destinations = local();
+        destinations.secrets.remove("K");
+        let response = adapter_to(Limits::default(), destinations)
+            .handle(request(node, input()))
+            .await
+            .expect("falls back");
+        assert_eq!(
+            error_code(response),
+            json!({ "code": "secret_host_not_allowed", "message": "secret K may not be sent to 127.0.0.1 (CONNECTORS__HOSTS__K)" })
+        );
+        assert_eq!(fake.hits(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_redirect_is_the_connectors_error_and_is_not_followed() {
+        let fake = fake().await;
+        let error = adapter(Limits::default())
+            .handle(request(config(fake.url("/moved"), json!({})), input()))
+            .await
+            .expect_err("redirect");
+        assert!(
+            error
+                .source
+                .to_string()
+                .contains("redirected the call (307)"),
+            "{}",
+            error.source
+        );
+        assert_eq!(
+            error.trace.unwrap().to_value()["error"]["code"],
+            json!("redirect")
+        );
+        // Only the redirecting call arrived: /score was never asked.
+        assert_eq!(fake.hits(), 1);
+    }
+
     #[tokio::test]
     async fn errors_never_carry_the_secret() {
         let fake = fake().await;
@@ -673,7 +945,7 @@ mod live {
                 .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
                 .collect(),
         );
-        ConnectorAdapter::live(limits, Arc::new(secrets))
+        ConnectorAdapter::live(limits, local(), Arc::new(secrets))
     }
 
     // ----- OAuth2 client credentials (DNK-63) ----------------------------------

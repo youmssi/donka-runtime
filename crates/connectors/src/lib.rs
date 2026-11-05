@@ -141,6 +141,78 @@ impl ClientTls {
     }
 }
 
+/// Where calls may go, whatever the node asks for (DNK-84): every host a connector calls must be
+/// in `hosts`, and every secret a call uses may only go to the hosts listed for it. A secret
+/// without a list is never sent. An entry is a host name (any port) or `host:port`, compared
+/// without regard to case. The Runtime enforces it before each call; Studio uses the same check
+/// to warn about connectors the installation would refuse.
+#[derive(Debug, Clone, Default)]
+pub struct Destinations {
+    pub hosts: Vec<String>,
+    pub secrets: HashMap<String, Vec<String>>,
+}
+
+impl Destinations {
+    /// Refuses `config` unless its service, and its token endpoint when it uses OAuth2, are
+    /// allowed for every call and for each secret sent there.
+    pub fn check(&self, config: &ConnectorConfig) -> Result<(), ConnectorError> {
+        let tls: Vec<&str> = config.tls.iter().flat_map(ClientTls::secrets).collect();
+        let service = config.auth.secret().into_iter();
+        self.check_url(&config.url, service.chain(tls.iter().copied()))?;
+        if let Auth::OAuth2 {
+            token_url, secret, ..
+        } = &config.auth
+        {
+            self.check_url(
+                token_url,
+                std::iter::once(secret.as_str()).chain(tls.iter().copied()),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn check_url<'a>(
+        &self,
+        url: &str,
+        secrets: impl IntoIterator<Item = &'a str>,
+    ) -> Result<(), ConnectorError> {
+        let parsed = url::Url::parse(url)
+            .map_err(|_| ConnectorError::InvalidConfig(format!("{url} is not a URL")))?;
+        let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+        let port = parsed.port_or_known_default();
+        let listed = |entries: &[String]| entries.iter().any(|entry| matches(entry, &host, port));
+        if !listed(&self.hosts) {
+            return Err(ConnectorError::HostNotAllowed(host));
+        }
+        for secret in secrets {
+            let entries = self
+                .secrets
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(secret))
+                .map(|(_, entries)| entries.as_slice())
+                .unwrap_or_default();
+            if !listed(entries) {
+                return Err(ConnectorError::SecretHostNotAllowed {
+                    secret: secret.to_owned(),
+                    host,
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Whether `entry` (`host` or `host:port`) names `host` and `port`.
+fn matches(entry: &str, host: &str, port: Option<u16>) -> bool {
+    let entry = entry.trim().to_ascii_lowercase();
+    match entry.rsplit_once(':') {
+        Some((name, wanted)) if wanted.parse::<u16>().is_ok() => {
+            name == host && port == wanted.parse().ok()
+        }
+        _ => entry == host,
+    }
+}
+
 /// Longest OAuth2 client id accepted.
 pub const MAX_CLIENT_ID: usize = 200;
 /// Most OAuth2 scopes a connector may ask for.
@@ -192,6 +264,12 @@ pub enum ConnectorError {
     InvalidCa(String),
     #[error("the secure connection failed: {0}")]
     Tls(String),
+    #[error("the Runtime does not allow connector calls to {0} (CONNECTORS__ALLOWED_HOSTS)")]
+    HostNotAllowed(String),
+    #[error("secret {secret} may not be sent to {host} (CONNECTORS__HOSTS__{secret})")]
+    SecretHostNotAllowed { secret: String, host: String },
+    #[error("the service redirected the call ({0}); connectors do not follow redirects")]
+    Redirect(u16),
 }
 
 impl ConnectorError {
@@ -214,6 +292,9 @@ impl ConnectorError {
             ConnectorError::InvalidCertificate(_) => "invalid_certificate",
             ConnectorError::InvalidCa(_) => "invalid_ca",
             ConnectorError::Tls(_) => "tls",
+            ConnectorError::HostNotAllowed(_) => "host_not_allowed",
+            ConnectorError::SecretHostNotAllowed { .. } => "secret_host_not_allowed",
+            ConnectorError::Redirect(_) => "redirect",
         }
     }
 }
@@ -271,11 +352,16 @@ impl ConnectorAdapter {
         }
     }
 
-    /// Calls the services for real, within `limits`, with secret values from `secrets`.
+    /// Calls the services for real, within `limits`, only to the hosts `destinations` allows,
+    /// with secret values from `secrets`.
     #[cfg(feature = "live")]
-    pub fn live(limits: Limits, secrets: std::sync::Arc<dyn Secrets>) -> Self {
+    pub fn live(
+        limits: Limits,
+        destinations: Destinations,
+        secrets: std::sync::Arc<dyn Secrets>,
+    ) -> Self {
         Self {
-            mode: Mode::Live(Box::new(live::Live::new(limits, secrets))),
+            mode: Mode::Live(Box::new(live::Live::new(limits, destinations, secrets))),
         }
     }
 

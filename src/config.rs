@@ -4,6 +4,7 @@ use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use strum_macros::AsRefStr;
@@ -155,6 +156,46 @@ pub struct ConnectorsConfig {
         default = "default_connector_breaker_cooldown"
     )]
     pub breaker_cooldown: Duration,
+
+    /// Donka: the hosts connectors may call, comma-separated (`CONNECTORS__ALLOWED_HOSTS`).
+    /// Empty refuses every call.
+    #[serde(default, deserialize_with = "deserialize_hosts")]
+    pub allowed_hosts: Vec<String>,
+
+    /// Donka: per secret, the hosts it may be sent to (`CONNECTORS__HOSTS__BUREAU_KEY`). A
+    /// secret without a list is never sent.
+    #[serde(default, deserialize_with = "deserialize_secret_hosts")]
+    pub hosts: HashMap<String, Vec<String>>,
+}
+
+/// Hosts given as one comma-separated value, as environment variables carry them.
+fn split_hosts(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn deserialize_hosts<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(split_hosts(&String::deserialize(deserializer)?))
+}
+
+/// Secret names are upper case, whatever case the configuration source gives the keys.
+fn deserialize_secret_hosts<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<String, Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(HashMap::<String, String>::deserialize(deserializer)?
+        .into_iter()
+        .map(|(secret, hosts)| (secret.to_ascii_uppercase(), split_hosts(&hosts)))
+        .collect())
 }
 
 fn default_connector_timeout() -> Duration {
@@ -190,6 +231,8 @@ impl Default for ConnectorsConfig {
             max_retries: default_connector_max_retries(),
             breaker_failures: default_connector_breaker_failures(),
             breaker_cooldown: default_connector_breaker_cooldown(),
+            allowed_hosts: Vec::new(),
+            hosts: HashMap::new(),
         }
     }
 }
