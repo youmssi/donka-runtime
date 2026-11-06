@@ -41,6 +41,22 @@ pub struct EnvironmentConfig {
 
     #[serde(default)]
     pub rate_limit: RateLimitConfig,
+
+    #[serde(default)]
+    pub artifact: ArtifactConfig,
+}
+
+/// Public keys Studio signs release artifacts with (DNK-87), each written
+/// `keyId=<base64 public key>` (`ARTIFACT__PUBLIC_KEY`,
+/// `ARTIFACT__PUBLIC_KEY_PREVIOUS`, `_FILE` forms included). Without one the
+/// Runtime serves artifacts as before and says so at start.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ArtifactConfig {
+    #[serde(default)]
+    pub public_key: Option<String>,
+
+    #[serde(default)]
+    pub public_key_previous: Option<String>,
 }
 
 /// Requests each access token may make per window (DNK-22). Off unless
@@ -352,6 +368,7 @@ impl Default for EnvironmentConfig {
             connectors: ConnectorsConfig::default(),
             decision_log: DecisionLogConfig::default(),
             rate_limit: RateLimitConfig::default(),
+            artifact: ArtifactConfig::default(),
         }
     }
 }
@@ -457,6 +474,9 @@ pub fn default_root() -> String {
 #[derive(Debug, Clone, Default)]
 pub struct GlobalAgentConfig {
     pub release_zip_password: Option<Arc<str>>,
+    /// Keys release artifacts are verified against (DNK-87); unenforced when
+    /// none is configured.
+    pub artifact_keys: crate::artifact_signature::ArtifactKeys,
 }
 
 #[derive(Debug, Clone, Deserialize)]

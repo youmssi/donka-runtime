@@ -124,6 +124,7 @@ impl GcsProvider {
                             }
                         },
                         password: self.global_config.release_zip_password.clone(),
+                        artifact_keys: self.global_config.artifact_keys.clone(),
                     };
 
                     let engine = match ImmutableLoader::try_from(archive) {

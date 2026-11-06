@@ -51,13 +51,15 @@ impl AgentDataProvider for ZipProvider {
     ) -> impl Future<Output = anyhow::Result<Vec<ProjectDiff>>> + Send + 'static {
         let root = self.root_dir.clone();
         let password = self.global_config.release_zip_password.clone();
+        let keys = self.global_config.artifact_keys.clone();
         let watch = self.watch;
 
         async move {
             if watch {
-                return load_changed(root, password, data).await;
+                return load_changed(root, password, keys, data).await;
             }
-            let projects = task::spawn_blocking(|| load_from_directory(root, password)).await?;
+            let projects =
+                task::spawn_blocking(|| load_from_directory(root, password, keys)).await?;
             let diff = projects
                 .iter()
                 .map(|project| ProjectDiff::Created(project.key().to_string()))
@@ -72,7 +74,11 @@ impl AgentDataProvider for ZipProvider {
     }
 }
 
-fn load_from_directory(root: PathBuf, password: Option<Arc<str>>) -> DashMap<String, Arc<Project>> {
+fn load_from_directory(
+    root: PathBuf,
+    password: Option<Arc<str>>,
+    keys: crate::artifact_signature::ArtifactKeys,
+) -> DashMap<String, Arc<Project>> {
     let files = match WalkDir::new(root.clone())
         .max_depth(1)
         .into_iter()
@@ -138,6 +144,7 @@ fn load_from_directory(root: PathBuf, password: Option<Arc<str>>) -> DashMap<Str
                     }
                 },
                 password: password.clone(),
+                artifact_keys: keys.clone(),
             };
 
             Some((
@@ -171,6 +178,7 @@ fn load_from_directory(root: PathBuf, password: Option<Arc<str>>) -> DashMap<Str
 async fn load_changed(
     root: PathBuf,
     password: Option<Arc<str>>,
+    keys: crate::artifact_signature::ArtifactKeys,
     data: Arc<AgentData>,
 ) -> anyhow::Result<Vec<ProjectDiff>> {
     let listed = task::spawn_blocking(move || list_artifacts(&root)).await?;
@@ -189,7 +197,7 @@ async fn load_changed(
             .into_iter()
             .filter(|artifact| to_load.contains(&artifact.key))
             .filter_map(|artifact| {
-                let project = load_artifact(&artifact, password.clone());
+                let project = load_artifact(&artifact, password.clone(), keys.clone());
                 if project.is_none() {
                     FailedProjectsRegistry::insert(artifact.hash.clone());
                 }
@@ -243,7 +251,11 @@ fn list_artifacts(root: &Path) -> Vec<Artifact> {
         .collect()
 }
 
-fn load_artifact(artifact: &Artifact, password: Option<Arc<str>>) -> Option<Project> {
+fn load_artifact(
+    artifact: &Artifact,
+    password: Option<Arc<str>>,
+    keys: crate::artifact_signature::ArtifactKeys,
+) -> Option<Project> {
     let file = File::open(&artifact.path)
         .map_err(|err| {
             tracing::error!(
@@ -262,15 +274,19 @@ fn load_artifact(artifact: &Artifact, password: Option<Arc<str>>) -> Option<Proj
             )
         })
         .ok()?;
-    let loader = ImmutableLoader::try_from(ProtectedZipArchive { archive, password })
-        .map_err(|err| {
-            tracing::error!(
-                "[Zip - Skip] failed load into engine {}: {}",
-                artifact.path.display(),
-                err
-            )
-        })
-        .ok()?;
+    let loader = ImmutableLoader::try_from(ProtectedZipArchive {
+        archive,
+        password,
+        artifact_keys: keys,
+    })
+    .map_err(|err| {
+        tracing::error!(
+            "[Zip - Skip] failed load into engine {}: {}",
+            artifact.path.display(),
+            err
+        )
+    })
+    .ok()?;
     Some(Project {
         engine: loader.into_engine(),
         content_hash: Some(artifact.hash.clone()),
