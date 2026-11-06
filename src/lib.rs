@@ -1,4 +1,5 @@
 pub mod app;
+pub mod artifact_signature;
 pub mod config;
 mod connectors;
 mod contract;

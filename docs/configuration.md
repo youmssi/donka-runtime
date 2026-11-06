@@ -41,6 +41,23 @@ On Kubernetes, mount the secret as a volume and point `X_FILE` at the file.
 Where the Runtime finds published releases. Donka Studio publishes each environment's releases
 under a prefix (`staging/`, `production/`): point each Runtime at its environment's prefix.
 
+### Signed artifacts
+
+Studio can sign each artifact with the installation's Ed25519 key; the signature travels
+inside the artifact (`.config/signature.json`). Give the Runtime the public keys and it
+refuses an artifact that is unsigned, altered, or signed by another key, keeps serving the
+last valid one, and logs why:
+
+```bash
+ARTIFACT__PUBLIC_KEY=2026-01=<base64 public key>
+# During a rotation, while artifacts signed with the previous key are still served:
+ARTIFACT__PUBLIC_KEY_PREVIOUS=2025-06=<base64 public key>
+```
+
+Each value is `keyId=<base64 public key>` (the `_FILE` form works too). Without a key the
+Runtime serves artifacts as before and says so at start, so existing installations upgrade
+in order: configure the keys, then let Studio sign.
+
 ### AWS
 
 In case your deployment supports IAM, most of the environment variables below are __optional__.

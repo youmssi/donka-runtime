@@ -43,8 +43,30 @@ async fn main() {
         }
     };
 
+    // Artifact signature keys (DNK-87): an invalid value stops the start, like
+    // any invalid setting; without keys the Runtime says so and serves as
+    // before, so existing installations upgrade in order.
+    let artifact_keys = match agent::artifact_signature::ArtifactKeys::parse(
+        "ARTIFACT__PUBLIC_KEY",
+        cfg.artifact.public_key.as_deref(),
+        cfg.artifact.public_key_previous.as_deref(),
+    ) {
+        Ok(keys) => keys,
+        Err(err) => {
+            eprintln!("Invalid environment variables: {err}");
+            std::process::exit(2);
+        }
+    };
+    if artifact_keys.enforced() {
+        tracing::info!("release artifacts are verified against the installation's signing keys");
+    } else {
+        tracing::warn!(
+            "no artifact signing key configured (ARTIFACT__PUBLIC_KEY): release artifacts are served unverified"
+        );
+    }
     let global_config = Arc::new(GlobalAgentConfig {
         release_zip_password: cfg.release_zip_password.clone(),
+        artifact_keys,
     });
 
     let agent = app::create_agent(cfg.clone(), global_config).await;

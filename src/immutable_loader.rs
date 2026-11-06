@@ -194,6 +194,9 @@ impl DecisionLoader for ImmutableLoader {
 pub struct ProtectedZipArchive<R> {
     pub password: Option<Arc<str>>,
     pub archive: ZipArchive<R>,
+    /// Keys signed artifacts are verified against (DNK-87); providers set
+    /// them from the global config, direct constructions leave them empty.
+    pub artifact_keys: crate::artifact_signature::ArtifactKeys,
 }
 
 impl<R> Deref for ProtectedZipArchive<R> {
@@ -238,6 +241,41 @@ where
     type Error = anyhow::Error;
 
     fn try_from(mut archive: ProtectedZipArchive<R>) -> Result<Self, Self::Error> {
+        // Signed artifacts are verified before anything is served (DNK-87):
+        // an artifact that is unsigned, altered, or signed by another key is
+        // refused here, so the last valid one keeps being served.
+        if archive.artifact_keys.enforced() {
+            let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
+            let mut signature: Option<Vec<u8>> = None;
+            for i in 0..archive.len() {
+                let mut file = archive
+                    .by_index_try_decrypt(i)
+                    .map_err(|_| anyhow!("failed to load file on index {i}"))?;
+                if !file.is_file() {
+                    continue;
+                }
+                let name = file.name()?.into_owned();
+                let mut body = Vec::new();
+                std::io::Read::read_to_end(&mut file, &mut body)
+                    .map_err(|_| anyhow!("failed to read file on index {i}"))?;
+                if name == crate::artifact_signature::SIGNATURE_ENTRY {
+                    signature = Some(body);
+                } else {
+                    entries.push((name, body));
+                }
+            }
+            match crate::artifact_signature::verify(
+                &archive.artifact_keys,
+                &entries,
+                signature.as_deref(),
+            ) {
+                crate::artifact_signature::Verdict::Verified
+                | crate::artifact_signature::Verdict::NotEnforced => {}
+                crate::artifact_signature::Verdict::Refused(reason) => {
+                    return Err(anyhow!("refused signed artifact check: {reason}"));
+                }
+            }
+        }
         let config_prefix = ".config";
 
         let release_data = archive
