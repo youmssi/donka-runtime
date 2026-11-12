@@ -42,15 +42,7 @@ pub async fn create_app(agent: Agent, config: EnvironmentConfig) -> Router<()> {
 
     let local_pool = LocalPoolHandle::new(available_parallelism().map(Into::into).unwrap_or(1));
 
-    let (router, openapi) = OpenApiRouter::with_openapi(openapi())
-        .routes(routes!(routes::engine::evaluate))
-        .routes(routes!(routes::rules::rules_evaluate))
-        .routes(routes!(routes::rules::rules_openapi))
-        .routes(routes!(routes::project_info::project_info))
-        .routes(routes!(routes::decision_points::decision_points))
-        .routes(routes!(routes::infra::version))
-        .routes(routes!(routes::infra::health))
-        .split_for_parts();
+    let (router, openapi) = api_router();
 
     // Keep the existing generated API schema across the Swagger adapter's major upgrade.
     let mut app = router.merge(
@@ -79,6 +71,22 @@ pub async fn create_app(agent: Agent, config: EnvironmentConfig) -> Router<()> {
     }
 
     app
+}
+
+fn api_router() -> (Router, utoipa::openapi::OpenApi) {
+    OpenApiRouter::with_openapi(openapi())
+        .routes(routes!(routes::engine::evaluate))
+        .routes(routes!(routes::rules::rules_evaluate))
+        .routes(routes!(routes::rules::rules_openapi))
+        .routes(routes!(routes::project_info::project_info))
+        .routes(routes!(routes::decision_points::decision_points))
+        .routes(routes!(routes::infra::version))
+        .routes(routes!(routes::infra::health))
+        .split_for_parts()
+}
+
+pub fn openapi_document() -> utoipa::openapi::OpenApi {
+    api_router().1
 }
 
 fn openapi() -> utoipa::openapi::OpenApi {

@@ -1,5 +1,15 @@
 # Rules OpenAPI
 
+The generated service OpenAPI document is also used by the versioned Donka
+documentation site. Export the exact schema for this checkout without starting
+the Runtime or its services:
+
+```sh
+SERVICE_VERSION="$(git describe --tags --always)" cargo run --locked --example export-openapi > openapi.json
+```
+
+The generated `openapi.json` is a build artifact and is not edited by hand.
+
 `GET /api/rules/{project}` returns an OpenAPI 3 document describing the
 deployed release's evaluable rules — one `POST /evaluate/{path}` operation per
 graph and policy, tagged by kind.
