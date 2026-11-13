@@ -118,8 +118,9 @@ jobs:
           sudo apt-get install -y skopeo
           authfile="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
           while IFS= read -r tag; do
+            source_tag="${tag##*:}"
             skopeo copy --all --preserve-digests --authfile "$authfile" \
-              "oci:$RUNNER_TEMP/runtime-image" "docker://$tag"
+              "oci:$RUNNER_TEMP/runtime-image:$source_tag" "docker://$tag"
           done <<< "$TAGS"
           found=$(skopeo inspect --raw --authfile "$authfile" "docker://$IMAGE@$DIGEST" | sha256sum | cut -d' ' -f1)
           test "sha256:$found" = "$DIGEST"
