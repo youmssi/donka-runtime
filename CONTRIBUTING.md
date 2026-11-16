@@ -13,7 +13,9 @@ fork-specific rules from `AGENTS.md`.
 
 Repository settings (GitHub → Settings): squash and merge commits allowed, rebase disabled, head
 branches deleted automatically; rulesets on `main` and `develop` requiring a pull request and
-green checks, blocking force pushes and deletion; default branch `develop`.
+green checks, blocking force pushes and deletion; GitHub default branch `main`. Story PRs must
+target `develop` as described below; select that base explicitly because GitHub may default a
+new PR to `main`.
 
 ## Story flow
 
