@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { URL } from 'node:url';
 import { candidatePlan } from './candidate-release.mjs';
 
 const source = { ref: 'develop', sha: 'a'.repeat(40) };

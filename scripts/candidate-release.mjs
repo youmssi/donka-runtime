@@ -1,4 +1,5 @@
 import { pathToFileURL } from 'node:url';
+import process from 'node:process';
 
 const candidatePattern = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-rc\.[1-9]\d*$/;
 const commitPattern = /^[a-f0-9]{40}$/;
