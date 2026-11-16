@@ -42,6 +42,7 @@ jobs:
       # warnings are reported, errors fail the build.
       - run: cargo clippy --all-targets --locked
       - run: node --test scripts/check-rust-coverage.test.mjs
+      - run: node --test scripts/candidate-release.test.mjs
       # tests/it starts MinIO and Azurite containers; GitHub runners provide Docker.
       - run: mkdir -p coverage && cargo llvm-cov --workspace --locked --json --output-path coverage/rust.json
         env:

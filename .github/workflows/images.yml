@@ -23,6 +23,15 @@ on:
         description: The release version, without the leading v (e.g. 1.5.0).
         required: true
         type: string
+      candidate:
+        description: Publish only the exact prerelease image tag, without stable aliases.
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      digest:
+        description: Digest of the scanned OCI image published by this workflow.
+        value: ${{ jobs.publish.outputs.digest }}
   workflow_dispatch:
     inputs:
       version:
@@ -35,7 +44,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: images-${{ inputs.version || github.ref }}
+  group: images-${{ inputs.candidate && 'candidate-' || '' }}${{ inputs.version || github.ref }}
   cancel-in-progress: false
 
 env:
@@ -45,6 +54,8 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -66,6 +77,16 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Keep prereleases on the candidate workflow
+        env:
+          VERSION: ${{ inputs.version }}
+          CANDIDATE: ${{ inputs.candidate }}
+        run: |
+          if [[ "$VERSION" == *-* && "$CANDIDATE" != "true" ]]; then
+            echo "::error::Prerelease versions must use the signed candidate workflow."
+            exit 1
+          fi
+
       - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         id: meta
         with:
@@ -73,9 +94,10 @@ jobs:
           tags: |
             type=raw,value=edge,enable=${{ inputs.version == '' }}
             type=sha,prefix=sha-,format=long,enable=${{ inputs.version == '' }}
-            type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
-            type=raw,value=latest,enable=${{ inputs.version != '' }}
+            type=raw,value=${{ inputs.version }},enable=${{ inputs.candidate == true }}
+            type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' && inputs.candidate != true }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' && inputs.candidate != true }}
+            type=raw,value=latest,enable=${{ inputs.version != '' && inputs.candidate != true }}
           labels: |
             org.opencontainers.image.title=Donka Runtime
             org.opencontainers.image.vendor=Donka
@@ -86,6 +108,23 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
+
+      - name: Reject an existing candidate image tag
+        if: inputs.candidate == true
+        env:
+          IMAGE: ${{ env.IMAGE }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if docker manifest inspect "$IMAGE:$VERSION" >/dev/null 2>"$RUNNER_TEMP/candidate-manifest-error"; then
+            echo "::error::Candidate image tag already exists; choose a new -rc.N version."
+            exit 1
+          elif grep -Eqi 'manifest unknown|no such manifest' "$RUNNER_TEMP/candidate-manifest-error"; then
+            echo "Candidate image tag is not present."
+          else
+            cat "$RUNNER_TEMP/candidate-manifest-error"
+            echo "::error::Could not confirm that the candidate image tag is unused."
+            exit 1
+          fi
 
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         id: build
