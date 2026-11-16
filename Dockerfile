@@ -8,11 +8,13 @@ WORKDIR /app
 ENV TSGO_CWASM_CACHE=/app/.tsgo-cache
 
 COPY Cargo.toml Cargo.lock build.rs ./
-RUN mkdir src \
+# Workspace members are small and rarely change; the layer depends on them too.
+COPY crates crates
+RUN mkdir -p /usr/local/cargo/git src \
     && echo 'fn main() {}' > src/main.rs \
     && touch src/lib.rs \
-    && cargo build --release \
-    && rm -rf src target/release/.fingerprint/agent-*
+    && cargo build --release --locked \
+    && rm -rf src target/release/.fingerprint/donka-runtime-* target/release/.fingerprint/agent-*
 
 FROM rust:1.96 AS builder
 
@@ -22,14 +24,15 @@ ENV TSGO_CWASM_CACHE=/app/.tsgo-cache
 COPY --from=deps /app/target target
 COPY --from=deps /app/.tsgo-cache .tsgo-cache
 COPY --from=deps /usr/local/cargo/registry /usr/local/cargo/registry
+COPY --from=deps /usr/local/cargo/git /usr/local/cargo/git
 
 COPY . .
-RUN cargo build --release
+RUN cargo build --release --locked
 
 FROM gcr.io/distroless/cc-debian13:nonroot AS runner
 
 WORKDIR /home/nonroot
-COPY --from=builder /app/target/release/agent ./app
+COPY --from=builder /app/target/release/donka-runtime ./app
 
 ARG SERVICE_VERSION=unknown
 ENV SERVICE_VERSION=$SERVICE_VERSION

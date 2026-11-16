@@ -1,9 +1,10 @@
 use crate::config::{EnvironmentConfig, GlobalAgentConfig};
 use crate::provider::Agent;
+use crate::rate_limit::{self, RateLimiter};
 use crate::routes;
 use axum::extract::DefaultBodyLimit;
 use axum::http::{HeaderValue, header};
-use axum::middleware::map_response;
+use axum::middleware::{from_fn, map_response};
 use axum::response::Response;
 use axum::{Extension, Router};
 use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
@@ -22,6 +23,11 @@ pub async fn create_agent(
     config: EnvironmentConfig,
     global_config: Arc<GlobalAgentConfig>,
 ) -> Agent {
+    crate::connectors::init(&config.connectors);
+    if let Err(error) = crate::decision_log::init(&config.decision_log) {
+        tracing::error!("Invalid decision log settings: {error:#}");
+        panic!("Invalid decision log settings");
+    }
     match Agent::new(config, global_config).await {
         Ok(agent) => agent,
         Err(error) => {
@@ -36,18 +42,19 @@ pub async fn create_app(agent: Agent, config: EnvironmentConfig) -> Router<()> {
 
     let local_pool = LocalPoolHandle::new(available_parallelism().map(Into::into).unwrap_or(1));
 
-    let (router, openapi) = OpenApiRouter::with_openapi(openapi())
-        .routes(routes!(routes::engine::evaluate))
-        .routes(routes!(routes::rules::rules_evaluate))
-        .routes(routes!(routes::rules::rules_openapi))
-        .routes(routes!(routes::project_info::project_info))
-        .routes(routes!(routes::decision_points::decision_points))
-        .routes(routes!(routes::infra::version))
-        .routes(routes!(routes::infra::health))
-        .split_for_parts();
+    let (router, openapi) = api_router();
 
-    let mut app = router
-        .merge(SwaggerUi::new("/api/docs").url("/api.json", openapi))
+    // Keep the existing generated API schema across the Swagger adapter's major upgrade.
+    let mut app = router.merge(
+        SwaggerUi::new("/api/docs").external_url_unchecked("/api.json", serde_json::json!(openapi)),
+    );
+    if let Some(limiter) = RateLimiter::new(&config.rate_limit) {
+        limiter.spawn_cleanup();
+        app = app
+            .layer(from_fn(rate_limit::limit))
+            .layer(Extension(limiter));
+    }
+    let mut app = app
         .layer(Extension(agent))
         .layer(Extension(local_pool))
         .layer(DefaultBodyLimit::max(16 * 1024 * 1024))
@@ -66,6 +73,22 @@ pub async fn create_app(agent: Agent, config: EnvironmentConfig) -> Router<()> {
     app
 }
 
+fn api_router() -> (Router, utoipa::openapi::OpenApi) {
+    OpenApiRouter::with_openapi(openapi())
+        .routes(routes!(routes::engine::evaluate))
+        .routes(routes!(routes::rules::rules_evaluate))
+        .routes(routes!(routes::rules::rules_openapi))
+        .routes(routes!(routes::project_info::project_info))
+        .routes(routes!(routes::decision_points::decision_points))
+        .routes(routes!(routes::infra::version))
+        .routes(routes!(routes::infra::health))
+        .split_for_parts()
+}
+
+pub fn openapi_document() -> utoipa::openapi::OpenApi {
+    api_router().1
+}
+
 fn openapi() -> utoipa::openapi::OpenApi {
     let service_version =
         std::env::var("SERVICE_VERSION").unwrap_or_else(|_| "unknown".to_string());
@@ -74,12 +97,7 @@ fn openapi() -> utoipa::openapi::OpenApi {
         .title(env!("CARGO_PKG_NAME"))
         .version(service_version)
         .description(Some(env!("CARGO_PKG_DESCRIPTION").to_string()))
-        .contact(Some(
-            ContactBuilder::new()
-                .name(Some("GoRules"))
-                .email(Some("hi@gorules.io"))
-                .build(),
-        ))
+        .contact(Some(ContactBuilder::new().name(Some("Donka")).build()))
         .build();
 
     utoipa::openapi::OpenApi::new(openapi_info, utoipa::openapi::Paths::new())

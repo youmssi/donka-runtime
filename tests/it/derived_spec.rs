@@ -10,6 +10,7 @@ async fn derived_router() -> Router {
     let config = EnvironmentConfig {
         provider: ProviderConfig::Zip(ZipProviderConfig {
             root_dir: "tests/data/derived".to_string(),
+            watch: false,
         }),
         ..Default::default()
     };

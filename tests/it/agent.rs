@@ -13,6 +13,7 @@ async fn zip_agent() {
     let config = EnvironmentConfig {
         provider: ProviderConfig::Zip(ZipProviderConfig {
             root_dir: "tests/data".to_string(),
+            watch: false,
         }),
         ..Default::default()
     };

@@ -1,0 +1,202 @@
+name: Images
+
+# The Runtime's published image (DNK-64): ghcr.io/youmssi/donka-runtime.
+#
+# - Every push to develop publishes `edge` and `sha-<commit>`, for staging and demos.
+# - Each release (called by release.yml with its tag) publishes `X.Y.Z`, `X.Y` and `latest`.
+#
+# Every image carries an SBOM and a provenance attestation, and is signed with cosign using
+# the key pair whose public key is `cosign.pub` at the root of this repository. Signatures are
+# not uploaded to the public transparency log, so a bank verifies them without network access:
+#
+#   cosign verify --key cosign.pub --insecure-ignore-tlog ghcr.io/youmssi/donka-runtime:X.Y.Z
+#
+# Signing needs the COSIGN_PRIVATE_KEY and COSIGN_PASSWORD secrets. A release refuses to
+# publish without them; an `edge` image is published unsigned, with a warning.
+
+on:
+  push:
+    branches: [develop]
+  workflow_call:
+    inputs:
+      version:
+        description: The release version, without the leading v (e.g. 1.5.0).
+        required: true
+        type: string
+      candidate:
+        description: Publish only the exact prerelease image tag, without stable aliases.
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      digest:
+        description: Digest of the scanned OCI image published by this workflow.
+        value: ${{ jobs.publish.outputs.digest }}
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Publish this version again from its tag (e.g. 1.5.0).
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: images-${{ inputs.candidate && 'candidate-' || '' }}${{ inputs.version || github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/youmssi/donka-runtime
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.version && format('v{0}', inputs.version) || github.sha }}
+
+      - name: Signing key
+        id: key
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          RELEASE: ${{ inputs.version != '' }}
+        run: |
+          if [ -n "$COSIGN_PRIVATE_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          elif [ "$RELEASE" = "true" ]; then
+            echo "::error::COSIGN_PRIVATE_KEY is not set: a release is never published unsigned."
+            exit 1
+          else
+            echo "::warning::COSIGN_PRIVATE_KEY is not set: this edge image is published unsigned."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Keep prereleases on the candidate workflow
+        env:
+          VERSION: ${{ inputs.version }}
+          CANDIDATE: ${{ inputs.candidate }}
+        run: |
+          if [[ "$VERSION" == *-* && "$CANDIDATE" != "true" ]]; then
+            echo "::error::Prerelease versions must use the signed candidate workflow."
+            exit 1
+          fi
+
+      - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        id: meta
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=edge,enable=${{ inputs.version == '' }}
+            type=sha,prefix=sha-,format=long,enable=${{ inputs.version == '' }}
+            type=raw,value=${{ inputs.version }},enable=${{ inputs.candidate == true }}
+            type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' && inputs.candidate != true }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' && inputs.candidate != true }}
+            type=raw,value=latest,enable=${{ inputs.version != '' && inputs.candidate != true }}
+          labels: |
+            org.opencontainers.image.title=Donka Runtime
+            org.opencontainers.image.vendor=Donka
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Reject an existing candidate image tag
+        if: inputs.candidate == true
+        env:
+          IMAGE: ${{ env.IMAGE }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if docker manifest inspect "$IMAGE:$VERSION" >/dev/null 2>"$RUNNER_TEMP/candidate-manifest-error"; then
+            echo "::error::Candidate image tag already exists; choose a new -rc.N version."
+            exit 1
+          elif grep -Eqi 'manifest unknown|no such manifest' "$RUNNER_TEMP/candidate-manifest-error"; then
+            echo "Candidate image tag is not present."
+          else
+            cat "$RUNNER_TEMP/candidate-manifest-error"
+            echo "::error::Could not confirm that the candidate image tag is unused."
+            exit 1
+          fi
+
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        id: build
+        with:
+          context: .
+          build-args: SERVICE_VERSION=${{ inputs.version || github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=oci,dest=${{ runner.temp }}/runtime-image,tar=false
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.1
+          input: ${{ runner.temp }}/runtime-image
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Publish the scanned index with its attestations
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y skopeo
+          authfile="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
+          while IFS= read -r tag; do
+            source_tag="${tag##*:}"
+            skopeo copy --all --preserve-digests --authfile "$authfile" \
+              "oci:$RUNNER_TEMP/runtime-image:$source_tag" "docker://$tag"
+          done <<< "$TAGS"
+          found=$(skopeo inspect --raw --authfile "$authfile" "docker://$IMAGE@$DIGEST" | sha256sum | cut -d' ' -f1)
+          test "sha256:$found" = "$DIGEST"
+
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+        if: steps.key.outputs.present == 'true'
+
+      - name: Sign
+        if: steps.key.outputs.present == 'true'
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cosign sign --yes --key env://COSIGN_PRIVATE_KEY --tlog-upload=false \
+            --recursive "$IMAGE@$DIGEST"
+
+      - name: Verify with the published public key
+        if: steps.key.outputs.present == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          test -f cosign.pub || { echo "::error::cosign.pub is missing from the repository"; exit 1; }
+          cosign verify --key cosign.pub --insecure-ignore-tlog "$IMAGE@$DIGEST" > /dev/null
+
+      - name: Summary
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+          SIGNED: ${{ steps.key.outputs.present }}
+        run: |
+          {
+            echo "### $IMAGE@$DIGEST"
+            echo
+            echo "Signed: $SIGNED"
+            echo
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

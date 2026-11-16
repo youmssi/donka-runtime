@@ -4,6 +4,7 @@ use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use strum_macros::AsRefStr;
@@ -31,6 +32,58 @@ pub struct EnvironmentConfig {
 
     #[serde(default)]
     pub tsgo: TsgoConfig,
+
+    #[serde(default)]
+    pub connectors: ConnectorsConfig,
+
+    #[serde(default)]
+    pub decision_log: DecisionLogConfig,
+
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
+
+    #[serde(default)]
+    pub artifact: ArtifactConfig,
+}
+
+/// Public keys Studio signs release artifacts with (DNK-87), each written
+/// `keyId=<base64 public key>` (`ARTIFACT__PUBLIC_KEY`,
+/// `ARTIFACT__PUBLIC_KEY_PREVIOUS`, `_FILE` forms included). Without one the
+/// Runtime serves artifacts as before and says so at start.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ArtifactConfig {
+    #[serde(default)]
+    pub public_key: Option<String>,
+
+    #[serde(default)]
+    pub public_key_previous: Option<String>,
+}
+
+/// Requests each access token may make per window (DNK-22). Off unless
+/// `requests` is set.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RateLimitConfig {
+    #[serde(default)]
+    pub requests: Option<u32>,
+
+    #[serde(
+        deserialize_with = "deserialize_millis",
+        default = "default_rate_limit_window"
+    )]
+    pub window: Duration,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            requests: None,
+            window: default_rate_limit_window(),
+        }
+    }
+}
+
+fn default_rate_limit_window() -> Duration {
+    Duration::from_secs(60)
 }
 
 fn default_refresh_interval() -> Duration {
@@ -87,6 +140,221 @@ impl Default for TsgoConfig {
     }
 }
 
+/// What connector nodes may do when a decision calls an outside service. A
+/// node may ask for less time or fewer retries, never more than the maximums.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConnectorsConfig {
+    #[serde(
+        deserialize_with = "deserialize_millis",
+        default = "default_connector_timeout"
+    )]
+    pub timeout: Duration,
+
+    #[serde(
+        deserialize_with = "deserialize_millis",
+        default = "default_connector_max_timeout"
+    )]
+    pub max_timeout: Duration,
+
+    #[serde(default = "default_connector_retries")]
+    pub retries: u32,
+
+    #[serde(default = "default_connector_max_retries")]
+    pub max_retries: u32,
+
+    /// Consecutive failed calls to one URL that pause calls to it…
+    #[serde(default = "default_connector_breaker_failures")]
+    pub breaker_failures: u32,
+
+    /// …for this long.
+    #[serde(
+        deserialize_with = "deserialize_millis",
+        default = "default_connector_breaker_cooldown"
+    )]
+    pub breaker_cooldown: Duration,
+
+    /// Donka: the hosts connectors may call, comma-separated (`CONNECTORS__ALLOWED_HOSTS`).
+    /// Empty refuses every call.
+    #[serde(default, deserialize_with = "deserialize_hosts")]
+    pub allowed_hosts: Vec<String>,
+
+    /// Donka: per secret, the hosts it may be sent to (`CONNECTORS__HOSTS__BUREAU_KEY`). A
+    /// secret without a list is never sent.
+    #[serde(default, deserialize_with = "deserialize_secret_hosts")]
+    pub hosts: HashMap<String, Vec<String>>,
+}
+
+/// Hosts given as one comma-separated value, as environment variables carry them.
+fn split_hosts(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn deserialize_hosts<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(split_hosts(&String::deserialize(deserializer)?))
+}
+
+/// Secret names are upper case, whatever case the configuration source gives the keys.
+fn deserialize_secret_hosts<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<String, Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(HashMap::<String, String>::deserialize(deserializer)?
+        .into_iter()
+        .map(|(secret, hosts)| (secret.to_ascii_uppercase(), split_hosts(&hosts)))
+        .collect())
+}
+
+fn default_connector_timeout() -> Duration {
+    Duration::from_millis(3_000)
+}
+
+fn default_connector_max_timeout() -> Duration {
+    Duration::from_millis(10_000)
+}
+
+fn default_connector_retries() -> u32 {
+    1
+}
+
+fn default_connector_max_retries() -> u32 {
+    3
+}
+
+fn default_connector_breaker_failures() -> u32 {
+    5
+}
+
+fn default_connector_breaker_cooldown() -> Duration {
+    Duration::from_millis(30_000)
+}
+
+impl Default for ConnectorsConfig {
+    fn default() -> Self {
+        Self {
+            timeout: default_connector_timeout(),
+            max_timeout: default_connector_max_timeout(),
+            retries: default_connector_retries(),
+            max_retries: default_connector_max_retries(),
+            breaker_failures: default_connector_breaker_failures(),
+            breaker_cooldown: default_connector_breaker_cooldown(),
+            allowed_hosts: Vec::new(),
+            hosts: HashMap::new(),
+        }
+    }
+}
+
+/// Where the Runtime sends a record of every evaluation (Donka Studio's
+/// decision log). Off unless both `url` and `token` are set.
+#[derive(Clone, Deserialize)]
+pub struct DecisionLogConfig {
+    /// Studio's feed endpoint, e.g. `https://studio.example/api/v1/decision-log/records`.
+    #[serde(default)]
+    pub url: Option<String>,
+
+    /// The decision-log token Studio issued for this Runtime's environment.
+    #[serde(default)]
+    pub token: Option<String>,
+
+    /// Records sent together, at most.
+    #[serde(default = "default_decision_log_batch_size")]
+    pub batch_size: usize,
+
+    /// Bytes of records sent together, at most (a record larger than this goes alone).
+    #[serde(default = "default_decision_log_batch_bytes")]
+    pub batch_bytes: usize,
+
+    /// How long a record waits for others before its batch is sent.
+    #[serde(
+        deserialize_with = "deserialize_millis",
+        default = "default_decision_log_flush_interval"
+    )]
+    pub flush_interval: Duration,
+
+    /// Records held while Studio cannot be reached; beyond this, new records are dropped
+    /// (and counted in the logs) rather than slowing evaluations down.
+    #[serde(default = "default_decision_log_queue_capacity")]
+    pub queue_capacity: usize,
+
+    /// Time allowed for one send.
+    #[serde(
+        deserialize_with = "deserialize_millis",
+        default = "default_decision_log_timeout"
+    )]
+    pub timeout: Duration,
+
+    /// Time allowed, when the Runtime stops, to send what is still queued.
+    #[serde(
+        deserialize_with = "deserialize_millis",
+        default = "default_decision_log_shutdown_timeout"
+    )]
+    pub shutdown_timeout: Duration,
+}
+
+// The token never reaches a log line.
+impl std::fmt::Debug for DecisionLogConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DecisionLogConfig")
+            .field("url", &self.url)
+            .field("token", &self.token.as_ref().map(|_| "<set>"))
+            .field("batch_size", &self.batch_size)
+            .field("batch_bytes", &self.batch_bytes)
+            .field("flush_interval", &self.flush_interval)
+            .field("queue_capacity", &self.queue_capacity)
+            .field("timeout", &self.timeout)
+            .field("shutdown_timeout", &self.shutdown_timeout)
+            .finish()
+    }
+}
+
+fn default_decision_log_batch_size() -> usize {
+    100
+}
+
+fn default_decision_log_batch_bytes() -> usize {
+    4 << 20
+}
+
+fn default_decision_log_flush_interval() -> Duration {
+    Duration::from_millis(1_000)
+}
+
+fn default_decision_log_queue_capacity() -> usize {
+    10_000
+}
+
+fn default_decision_log_timeout() -> Duration {
+    Duration::from_millis(10_000)
+}
+
+fn default_decision_log_shutdown_timeout() -> Duration {
+    Duration::from_millis(10_000)
+}
+
+impl Default for DecisionLogConfig {
+    fn default() -> Self {
+        Self {
+            url: None,
+            token: None,
+            batch_size: default_decision_log_batch_size(),
+            batch_bytes: default_decision_log_batch_bytes(),
+            flush_interval: default_decision_log_flush_interval(),
+            queue_capacity: default_decision_log_queue_capacity(),
+            timeout: default_decision_log_timeout(),
+            shutdown_timeout: default_decision_log_shutdown_timeout(),
+        }
+    }
+}
+
 impl Default for EnvironmentConfig {
     fn default() -> Self {
         Self {
@@ -97,6 +365,10 @@ impl Default for EnvironmentConfig {
             otel_enabled: false,
             http_ssl: None,
             tsgo: TsgoConfig::default(),
+            connectors: ConnectorsConfig::default(),
+            decision_log: DecisionLogConfig::default(),
+            rate_limit: RateLimitConfig::default(),
+            artifact: ArtifactConfig::default(),
         }
     }
 }
@@ -142,12 +414,17 @@ impl Default for ProviderConfig {
 pub struct ZipProviderConfig {
     #[serde(default = "default_root")]
     pub root_dir: String,
+    /// Donka: reload the folder's artifacts when they change, every poll interval, and read
+    /// Studio's artifacts, which have no `.zip` extension (DNK-64).
+    #[serde(default)]
+    pub watch: bool,
 }
 
 impl Default for ZipProviderConfig {
     fn default() -> Self {
         Self {
             root_dir: default_root(),
+            watch: false,
         }
     }
 }
@@ -197,6 +474,9 @@ pub fn default_root() -> String {
 #[derive(Debug, Clone, Default)]
 pub struct GlobalAgentConfig {
     pub release_zip_password: Option<Arc<str>>,
+    /// Keys release artifacts are verified against (DNK-87); unenforced when
+    /// none is configured.
+    pub artifact_keys: crate::artifact_signature::ArtifactKeys,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -277,5 +557,39 @@ mod tests {
 
         assert!(!config.tsgo.enabled);
         assert_eq!(config.tsgo.timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn decision_log_is_off_by_default() {
+        let config = parse(&[]);
+
+        assert!(config.decision_log.url.is_none());
+        assert!(config.decision_log.token.is_none());
+        assert_eq!(config.decision_log.batch_size, 100);
+    }
+
+    #[test]
+    fn decision_log_reads_the_documented_env_vars() {
+        let config = parse(&[
+            (
+                "DECISION_LOG__URL",
+                "https://studio.example/api/v1/decision-log/records",
+            ),
+            ("DECISION_LOG__TOKEN", "dnk_log_secret"),
+            ("DECISION_LOG__BATCH_SIZE", "20"),
+            ("DECISION_LOG__FLUSH_INTERVAL", "250"),
+            ("DECISION_LOG__QUEUE_CAPACITY", "500"),
+        ]);
+
+        let log = config.decision_log;
+        assert_eq!(
+            log.url.as_deref(),
+            Some("https://studio.example/api/v1/decision-log/records")
+        );
+        assert_eq!(log.token.as_deref(), Some("dnk_log_secret"));
+        assert_eq!(log.batch_size, 20);
+        assert_eq!(log.flush_interval, Duration::from_millis(250));
+        assert_eq!(log.queue_capacity, 500);
+        assert!(!format!("{log:?}").contains("dnk_log_secret"));
     }
 }

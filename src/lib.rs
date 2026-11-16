@@ -1,12 +1,18 @@
 pub mod app;
+pub mod artifact_signature;
 pub mod config;
+mod connectors;
+mod contract;
 mod data;
+pub mod decision_log;
 mod engine_ext;
 mod immutable_loader;
 mod provider;
+mod rate_limit;
 mod routes;
 mod rules_spec;
 mod schema;
+pub mod secret_files;
 mod spec_derive;
 pub mod telemetry;
 pub mod tsgo;

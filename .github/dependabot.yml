@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # Keeps the pinned action SHAs (DNK-73) fresh: one grouped pull request a week.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]

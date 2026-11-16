@@ -1,121 +1,125 @@
-# GoRules Agent
+![Donka Runtime](.github/assets/banner.svg)
 
-[Website](https://gorules.io) | [Documentation](https://docs.gorules.io) | [GitHub - public mirror](https://github.com/gorules/agent-public)
+<h1 align="center">Donka Runtime</h1>
 
-The GoRules Agent is an Open-source, standalone microservice that acts as a high-performance Rules Engine over REST, without requiring a UI. It is designed to pull Releases from Object Storage, automatically re-load them at runtime when changes occur, and evaluate decision models efficiently. This ensures that your rules are always up-to-date and accessible with minimal configuration.
+<p align="center">
+    Serve released credit decisions over REST, hot-reloaded from object storage
+</p>
 
-## Environment Variables
+<p align="center">
+    <a href="https://github.com/youmssi/donka-runtime/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/youmssi/donka-runtime/ci.yml?branch=develop&label=CI" alt="CI"/></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/youmssi/donka-runtime" alt="License"/></a>
+    <img src="https://img.shields.io/badge/rust-stable-b7410e?logo=rust&logoColor=white" alt="Rust stable"/>
+    <img src="https://img.shields.io/badge/zen--engine-2.1.6-1d4f91" alt="zen-engine 2.1.6"/>
+    <a href="Dockerfile"><img src="https://img.shields.io/badge/docker-image-2496ed?logo=docker&logoColor=white" alt="Docker image"/></a>
+    <a href="https://github.com/youmssi/donka"><img src="https://img.shields.io/badge/part%20of-Donka-1d4f91" alt="Part of Donka"/></a>
+</p>
 
-### AWS
+<p align="center">
+    <a href="docs/configuration.md">Configuration</a> ·
+    <a href="docs/connectors.md">Connectors</a> ·
+    <a href="docs/decision-log.md">Decision log</a> ·
+    <a href="docs/contracts.md">Input contracts</a> ·
+    <a href="docs/rules-openapi.md">Rules OpenAPI</a> ·
+    <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
-In case your deployment supports IAM, most of the environment variables below are __optional__.
+## Introduction
 
-```bash
-PROVIDER__TYPE=S3
-PROVIDER__BUCKET=bucket
-PROVIDER__REGION=us-east-1 # Optional in case of IAM
-AWS_ACCESS_KEY_ID=<aws-access-key-id> # Optional in case of IAM
-AWS_SECRET_ACCESS_KEY=<aws-secret-access-key> # Optional in case of IAM
-```
+[Donka](https://github.com/youmssi/donka) is a decision management platform for credit and risk
+teams. Analysts build, test and approve scoring rules in Donka Studio, which publishes each
+release to object storage.
 
-### Azure
+Donka Runtime is the standalone service your systems call for a decision. It loads the releases
+Studio published, reloads them the moment they change, and evaluates them with the
+[ZEN engine](https://github.com/gorules/zen), with no UI and no database to run.
 
-```bash
-PROVIDER__TYPE=AzureStorage
-PROVIDER__CONNECTION_STRING=<connection-string>
-PROVIDER__CONTAINER=<container-name>
-```
+## Features
 
-### Google Cloud
+- **Hot reload**: picks up a new release (or a rollback) from S3, MinIO, Azure Blob, GCS or local
+  files without a restart
+- **Per-environment tokens**: callers send `X-Access-Token`; only hashes are in the release, and a
+  staging token is refused by production
+- **Connectors**: decisions call credit bureaus, KYC or AML providers, with timeouts, retries, a
+  circuit breaker and secrets kept in the environment
+- **Decision log**: every evaluation goes to Studio in the background, for search, explanation
+  and replay, without slowing the answer
+- **Rate limits**: a per-token request limit, answered with `429` and `Retry-After`; health is
+  never limited
+- **Traces on demand**: `trace: true` shows how each node reached its result
+- **Rules OpenAPI**: one OpenAPI document per project, with schemas derived from the rules
+- **Production-ready**: graceful shutdown, health and version endpoints, one small container
 
-```bash
-PROVIDER__TYPE=GCS
-PROVIDER__BUCKET=<bucket-name>
-PROVIDER__BASE64_CONTENTS=<base64-credential-contents>
-```
+## Quick start
 
-### FileSystem
-```bash
-PROVIDER__TYPE=Filesystem
-```
-
-### FileSystem Zip
-For FileSystem type, all project zips should be in ./data folder.
-You can build your own image bundled with rules by doing docker build from our image and adding layer that adds ./data folder
-```bash
-PROVIDER__TYPE=Zip
-```
-
-### MinIO
-```bash
-PROVIDER__TYPE=S3
-PROVIDER__REGION=us-east-1
-PROVIDER__BUCKET=bucket
-PROVIDER__FORCE_PATH_STYLE=true
-PROVIDER__ENDPOINT=http://localhost:9000
-PROVIDER__PREFIX=folder/
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-```
-## Rules OpenAPI
-
-`GET /api/rules/{project}` returns an OpenAPI 3 document describing the
-deployed release's evaluable rules — one `POST /evaluate/{path}` operation per
-graph and policy, tagged by kind.
-
-Request and response schemas come from the rule itself when it declares them on
-its input/output nodes. Anything undeclared is derived by analysing the release
-as a single workspace: property references become a nested JSON Schema, and the
-return types of function nodes are resolved by type-checking their TypeScript.
-
-The document is built on the first request for a project and reused until the
-release changes, so only that first request pays for the analysis.
-
-### Type resolution
-
-Function-node types are resolved by [tsgo](https://github.com/microsoft/typescript-go),
-the TypeScript compiler compiled to WebAssembly and run under wasmtime. It is
-precompiled at build time (`build.rs`) and embedded in the binary, so startup
-deserializes an artifact rather than compiling one.
-
-Running the compiler in a wasm sandbox is what makes it safe to type-check
-untrusted rule content in-process: a guest that panics, traps, runs away or
-exhausts memory is contained by wasmtime and surfaces as an unresolved type,
-never as a crashed agent. Every failure degrades to publishing the declared
-schema instead of the derived one.
+Each release is published as a signed image, `ghcr.io/youmssi/donka-runtime`, with an SBOM and
+a provenance attestation (`edge` follows `develop`). The publishing workflow scans the built
+image and stops on fixable high or critical findings. Verify it with the public key `cosign.pub`
+from this repository, without network access to a transparency log:
 
 ```bash
-TSGO__ENABLED=true         # set false to skip type resolution entirely
-TSGO__MEMORY_BYTES=2147483648
-TSGO__TIMEOUT=30000        # milliseconds
-TSGO__CACHE_CAPACITY=4096  # resolved function types held per process
+cosign verify --key cosign.pub --insecure-ignore-tlog ghcr.io/youmssi/donka-runtime:latest
 ```
 
-### Build caching
-
-Precompiling the module costs ~26 CPU-seconds. Cargo caches it locally, so only
-a change to `build.rs` itself rebuilds it — but CI and Docker start cold. Point
-`TSGO_CWASM_CACHE` at a directory to keep the artifact across builds:
+Run it against a MinIO bucket that Studio publishes the `staging` environment to (or build it
+yourself with `docker build -t donka-runtime .`):
 
 ```bash
-TSGO_CWASM_CACHE=.tsgo-cache cargo build --release
+docker run --rm -p 8080:8080 \
+  -e PROVIDER__TYPE=S3 -e PROVIDER__BUCKET=donka-releases -e PROVIDER__REGION=us-east-1 \
+  -e PROVIDER__ENDPOINT=http://minio:9000 -e PROVIDER__FORCE_PATH_STYLE=true \
+  -e PROVIDER__PREFIX=staging/ \
+  -e AWS_ACCESS_KEY_ID=... -e AWS_SECRET_ACCESS_KEY=... \
+  ghcr.io/youmssi/donka-runtime:latest
 ```
 
-`build.rs` revalidates whatever it finds there, checking both that the artifact
-came from the same tsgo revision and target and that it still loads. A stale or
-corrupt entry is rebuilt rather than used, so the cache cannot ship a module
-that fails at runtime.
-
-CI restores this directory with `actions/cache`, and the Dockerfile keeps
-dependencies and the module in a stage that only the manifests and `build.rs`
-invalidate.
-
-### Building offline
-
-`build.rs` fetches the tsgo wasm module from the `tsgo-wasm` crate's GitHub
-release and verifies its checksum. For air-gapped builds, point it at a local
-copy instead:
+Then ask for a decision with a token issued in Studio (**Environments → Runtime tokens**):
 
 ```bash
-TSGO_WASM_FILE=/path/to/tsgo.wasm.zst cargo build --release
+curl -s -X POST localhost:8080/api/projects/credit-pme/evaluate/eligibility \
+  -H "X-Access-Token: $DONKA_RUNTIME_TOKEN" -H 'content-type: application/json' \
+  -H 'X-Donka-Reference: APP-2026-0042' \
+  -d '{ "context": { "applicant": { "monthlyIncome": 450000 } } }'
 ```
+
+| Endpoint                                     | What it does                                   |
+| -------------------------------------------- | ---------------------------------------------- |
+| `POST /api/projects/{project}/evaluate/{key}` | Evaluate a decision (`context`, `trace`)      |
+| `POST /api/rules/{project}/evaluate/{path}`   | Evaluate a rule by path                       |
+| `GET /api/rules/{project}`                    | OpenAPI document of the project's rules       |
+| `GET /api/projects/{project}/entrypoints`     | The decisions a project exposes               |
+| `GET /api/health`, `GET /api/version`         | Health and version                            |
+| `GET /api/docs`                               | Interactive API documentation                 |
+
+Every storage provider, token rule and setting is in [docs/configuration.md](docs/configuration.md).
+
+## Documentation
+
+| Page                                           | What it covers                                                  |
+| ---------------------------------------------- | --------------------------------------------------------------- |
+| [docs/configuration.md](docs/configuration.md) | Release storage, listening address, access tokens, rate limits  |
+| [docs/connectors.md](docs/connectors.md)       | Connector nodes, secrets, timeouts, retries, circuit breaker    |
+| [docs/decision-log.md](docs/decision-log.md)   | The feed to Studio, references, batching, retries, shutdown     |
+| [docs/contracts.md](docs/contracts.md)         | Input contracts: the `400` naming the field a request gets wrong |
+| [docs/rules-openapi.md](docs/rules-openapi.md) | Rules OpenAPI, TypeScript type resolution, build caching        |
+| [Artifact format](https://github.com/youmssi/donka/blob/develop/docs/artifact-format.md) | What Studio publishes (`.config/project.json`) |
+| [DONKA.md](DONKA.md)                           | What this fork changes from upstream                            |
+
+## Contributing
+
+Read [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md) first. Stories live in the
+[Studio backlog](https://github.com/youmssi/donka/tree/develop/docs/backlog); each one gets a
+`dnk-<n>-<slug>` branch, squash-merged into `develop`.
+
+```bash
+cargo fmt --all --check
+cargo clippy --all-targets
+cargo test                    # tests/it needs Docker (MinIO, Azurite)
+cargo test -p donka-connectors
+```
+
+## License
+
+MIT, see [LICENSE](LICENSE). Donka Runtime is a fork of
+[gorules/agent-public](https://github.com/gorules/agent-public); the original copyright notice
+is kept.

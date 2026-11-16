@@ -1,0 +1,32 @@
+[package]
+name = "donka-connectors"
+description = "Connector nodes for Donka decisions: outbound HTTP JSON calls with timeouts, retries and a circuit breaker, or mock and recorded responses for simulation and replay"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[features]
+# Real HTTP calls (the Runtime). Without it only mock mode exists (Studio's simulator).
+live = ["dep:reqwest", "dep:rustls", "dep:tokio"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+# Host names for the destination check (DNK-84); reqwest uses the same crate.
+url = "2"
+zen-engine = { version = "=2.1.6", features = ["arbitrary_precision"] }
+zen-tmpl = { version = "=2.1.6", features = ["arbitrary_precision"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+# Only to name a failed TLS handshake; reqwest brings the same version.
+rustls = { version = "0.23", default-features = false, optional = true }
+tokio = { version = "1", features = ["time"], optional = true }
+
+[dev-dependencies]
+axum = "0.8"
+hyper-util = { version = "0.1", features = ["server-auto", "service", "tokio"] }
+rcgen = "0.14"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+tokio = { version = "1", features = ["full"] }

@@ -69,6 +69,25 @@ async fn run_engine_test(config: EnvironmentConfig, project_name: &str) {
     let agent = app::create_agent(config.clone(), Default::default()).await;
     let router = app::create_app(agent, config).await;
 
+    let schema = router
+        .clone()
+        .oneshot(Request::get("/api.json").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(schema.status(), 200);
+    let schema: serde_json::Value =
+        serde_json::from_slice(&to_bytes(schema.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(schema["openapi"], "3.1.0");
+    assert!(schema["paths"]["/api/projects/{project}/evaluate/{*key}"]["post"].is_object());
+    let docs = router
+        .clone()
+        .oneshot(Request::get("/api/docs/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(docs.status(), 200);
+    let html = to_bytes(docs.into_body(), usize::MAX).await.unwrap();
+    assert!(std::str::from_utf8(&html).unwrap().contains("swagger-ui"));
+
     let req_json = json!({ "context": { "hello": "world" }});
 
     for key in decision_paths() {
