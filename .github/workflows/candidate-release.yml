@@ -1,0 +1,123 @@
+name: Candidate release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Candidate version in X.Y.Z-rc.N format, for example 1.5.0-rc.1.
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: candidate-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      release_tag: ${{ steps.plan.outputs.release_tag }}
+      asset_name: ${{ steps.plan.outputs.asset_name }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Validate candidate source and version
+        id: plan
+        env:
+          VERSION: ${{ inputs.version }}
+          REF: ${{ github.ref_name }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: node scripts/candidate-release.mjs "$VERSION" "$REF" "$SOURCE_COMMIT"
+      - name: Reject reused Git tag or registry image tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.plan.outputs.release_tag }}
+          IMAGE_TAG: ${{ steps.plan.outputs.image_tag }}
+          IMAGE: ghcr.io/youmssi/donka-runtime
+          ACTOR: ${{ github.actor }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "::error::Candidate release tag already exists; choose a new -rc.N version."
+            exit 1
+          else
+            result=$?
+            [ "$result" -eq 2 ] || exit "$result"
+          fi
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          if docker manifest inspect "$IMAGE:$IMAGE_TAG" >/dev/null 2>"$RUNNER_TEMP/candidate-manifest-error"; then
+            echo "::error::Candidate image tag already exists; choose a new -rc.N version."
+            exit 1
+          elif grep -Eqi 'manifest unknown|no such manifest' "$RUNNER_TEMP/candidate-manifest-error"; then
+            echo "Candidate image tag is not present."
+          else
+            cat "$RUNNER_TEMP/candidate-manifest-error"
+            echo "::error::Could not confirm that the candidate image tag is unused."
+            exit 1
+          fi
+      - name: Create the candidate draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.plan.outputs.release_tag }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          gh release create "$RELEASE_TAG" --target "$SOURCE_COMMIT" --draft --prerelease --latest=false \
+            --title "Donka Runtime $VERSION candidate" \
+            --notes "Signed Runtime candidate $VERSION from $SOURCE_COMMIT. This prerelease is for isolated staging, not production."
+
+  image:
+    needs: prepare
+    uses: ./.github/workflows/images.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      candidate: true
+    secrets: inherit
+    permissions:
+      contents: write
+      packages: write
+
+  publish:
+    needs: [prepare, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Record the signed image digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          IMAGE: ghcr.io/youmssi/donka-runtime
+          IMAGE_DIGEST: ${{ needs.image.outputs.digest }}
+          ASSET_NAME: ${{ needs.prepare.outputs.asset_name }}
+        run: |
+          node --input-type=module -e '
+            import { writeFile } from "node:fs/promises";
+            const manifest = {
+              repository: "youmssi/donka-runtime",
+              version: process.env.VERSION,
+              releaseTag: process.env.RELEASE_TAG,
+              sourceCommit: process.env.SOURCE_COMMIT,
+              image: { ref: `${process.env.IMAGE}@${process.env.IMAGE_DIGEST}`, digest: process.env.IMAGE_DIGEST },
+            };
+            await writeFile(process.env.ASSET_NAME, `${JSON.stringify(manifest, null, 2)}\n`);
+          '
+          gh release upload "$RELEASE_TAG" "$ASSET_NAME"
+          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.id')
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            -F draft=false -F prerelease=true -f make_latest=false >/dev/null
+          gh release view "$RELEASE_TAG" --json isImmutable,isPrerelease,tagName \
+            | jq -e --arg tag "$RELEASE_TAG" '.isImmutable == true and .isPrerelease == true and .tagName == $tag'
+
