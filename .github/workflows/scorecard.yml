@@ -1,4 +1,4 @@
-# OpenSSF Scorecard: weekly supply-chain analysis of this repository.
+# OpenSSF Scorecard: weekly supply-chain analysis of this repository's default branch.
 # Results are published to the Security tab (code scanning) by the workflow itself.
 name: Scorecard
 
@@ -7,7 +7,8 @@ on:
   schedule:
     - cron: "23 6 * * 1"
   push:
-    branches: [develop, main]
+    # Scorecard publishing supports the default branch only.
+    branches: [main]
 
 permissions: read-all
 
