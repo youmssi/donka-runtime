@@ -56,6 +56,7 @@ pub async fn create_app(agent: Agent, config: EnvironmentConfig) -> Router<()> {
     }
     let mut app = app
         .layer(Extension(agent))
+        .layer(Extension(config.batch_evaluation.clone()))
         .layer(Extension(local_pool))
         .layer(DefaultBodyLimit::max(16 * 1024 * 1024))
         .layer(map_response(map_json_charset));
@@ -76,6 +77,7 @@ pub async fn create_app(agent: Agent, config: EnvironmentConfig) -> Router<()> {
 fn api_router() -> (Router, utoipa::openapi::OpenApi) {
     OpenApiRouter::with_openapi(openapi())
         .routes(routes!(routes::engine::evaluate))
+        .routes(routes!(routes::engine::evaluate_batch))
         .routes(routes!(routes::rules::rules_evaluate))
         .routes(routes!(routes::rules::rules_openapi))
         .routes(routes!(routes::project_info::project_info))

@@ -54,6 +54,12 @@ impl RateLimiter {
         Ok(())
     }
 
+    /// Charges one item in an endpoint that deliberately processes multiple
+    /// evaluations in a single HTTP request.
+    pub fn charge(&self, token: &str) -> Result<(), Duration> {
+        self.check(hash_token(token), Instant::now())
+    }
+
     /// Drops the tokens that are back to a full allowance, so they cost nothing.
     fn forget_idle(&self, now: Instant) {
         self.arrivals.retain(|_, arrival| *arrival > now);
@@ -94,6 +100,11 @@ pub async fn limit(
     let Some((project, rules)) = limited_project(request.uri().path()) else {
         return next.run(request).await;
     };
+    // The batch handler charges the token once for every input, preserving the
+    // same budget as making the equivalent number of single requests.
+    if request.uri().path().contains("/evaluate-batch/") {
+        return next.run(request).await;
+    }
     let token = request
         .headers()
         .get("X-Access-Token")
@@ -106,7 +117,7 @@ pub async fn limit(
         return next.run(request).await;
     }
 
-    match limiter.check(hash_token(token), Instant::now()) {
+    match limiter.charge(token) {
         Ok(()) => next.run(request).await,
         Err(wait) => too_many_requests(wait, rules),
     }

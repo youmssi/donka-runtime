@@ -1,5 +1,7 @@
 use agent::app;
-use agent::config::{EnvironmentConfig, ProviderConfig, ZipProviderConfig};
+use agent::config::{
+    BatchEvaluationConfig, EnvironmentConfig, ProviderConfig, RateLimitConfig, ZipProviderConfig,
+};
 use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
@@ -15,6 +17,19 @@ async fn rules_router() -> Router {
         ..Default::default()
     };
 
+    let agent = app::create_agent(config.clone(), Default::default()).await;
+    app::create_app(agent, config).await
+}
+
+async fn batch_router(max_inputs: usize) -> Router {
+    let config = EnvironmentConfig {
+        provider: ProviderConfig::Zip(ZipProviderConfig {
+            root_dir: "tests/data/rules".to_string(),
+            watch: false,
+        }),
+        batch_evaluation: BatchEvaluationConfig { max_inputs },
+        ..Default::default()
+    };
     let agent = app::create_agent(config.clone(), Default::default()).await;
     app::create_app(agent, config).await
 }
@@ -39,6 +54,108 @@ fn evaluate_request(uri: &str, token: Option<&str>, body: Value) -> Request<Body
         builder = builder.header("X-Access-Token", token);
     }
     builder.body(Body::from(body.to_string())).unwrap()
+}
+
+#[tokio::test]
+async fn batch_evaluation_preserves_order_and_bounds_input_count() {
+    let router = batch_router(2).await;
+    let (status, _, body) = send(
+        &router,
+        evaluate_request(
+            "/api/projects/rules-project/evaluate-batch/Pricing%20Rule",
+            Some("secret-token"),
+            json!({"inputs": [
+                {"input": {"cartTotal": 100}, "reference": "portfolio-row-1"},
+                {"input": {"cartTotal": 50}, "reference": "portfolio-row-2"}
+            ]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["items"].as_array().unwrap().len(), 2);
+    assert_eq!(body["items"][0]["index"], json!(0));
+    assert_eq!(body["items"][1]["index"], json!(1));
+    assert_eq!(body["items"][0]["status"], json!(200));
+    assert_eq!(body["items"][1]["status"], json!(200));
+    assert!(body["batchId"].as_str().is_some());
+
+    let (status, _, _) = send(
+        &router,
+        evaluate_request(
+            "/api/projects/rules-project/evaluate-batch/Pricing%20Rule",
+            Some("secret-token"),
+            json!({"inputs": [
+                {"input": {"cartTotal": 1}},
+                {"input": {"cartTotal": 2}},
+                {"input": {"cartTotal": 3}}
+            ]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn batch_evaluation_keeps_partial_failures_and_rejects_invalid_tokens() {
+    let router = batch_router(3).await;
+    let (status, _, body) = send(
+        &router,
+        evaluate_request(
+            "/api/projects/rules-project/evaluate-batch/Pricing%20Rule",
+            Some("secret-token"),
+            json!({"inputs": [
+                {"input": {"cartTotal": 100}},
+                {"input": {}}
+            ]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["items"][0]["status"], json!(200));
+    assert_eq!(body["items"][1]["status"], json!(400));
+
+    let (status, _, _) = send(
+        &router,
+        evaluate_request(
+            "/api/projects/rules-project/evaluate-batch/Pricing%20Rule",
+            Some("wrong-token"),
+            json!({"inputs": [{"input": {"cartTotal": 100}}]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn batch_evaluation_charges_rate_limit_per_input() {
+    let config = EnvironmentConfig {
+        provider: ProviderConfig::Zip(ZipProviderConfig {
+            root_dir: "tests/data/rules".to_string(),
+            watch: false,
+        }),
+        rate_limit: RateLimitConfig {
+            requests: Some(1),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let agent = app::create_agent(config.clone(), Default::default()).await;
+    let router = app::create_app(agent, config).await;
+    let (status, _, body) = send(
+        &router,
+        evaluate_request(
+            "/api/projects/rules-project/evaluate-batch/Pricing%20Rule",
+            Some("secret-token"),
+            json!({"inputs": [
+                {"input": {"cartTotal": 100}},
+                {"input": {"cartTotal": 50}}
+            ]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["items"][0]["status"], json!(200));
+    assert_eq!(body["items"][1]["status"], json!(429));
 }
 
 #[tokio::test]
