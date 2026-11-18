@@ -95,6 +95,7 @@ fn record(key: &str) -> Record {
         environment: "production".into(),
         decision_key: key.into(),
         reference: None,
+        batch_id: None,
         evaluated_at: Utc::now(),
         duration_us: 10,
         status: Status::Succeeded,
@@ -103,6 +104,18 @@ fn record(key: &str) -> Record {
         trace: None,
         error: None,
     }
+}
+
+#[test]
+fn batch_id_is_carried_on_each_feed_record_when_present() {
+    let id = Uuid::parse_str("2b5a7ac0-e9ce-4d93-b923-37c718b220b6").unwrap();
+    let mut entry = record("person-score");
+    entry.batch_id = Some(id);
+    let encoded = serde_json::to_value(entry).unwrap();
+    assert_eq!(encoded["batchId"], id.to_string());
+
+    let ordinary = serde_json::to_value(record("person-score")).unwrap();
+    assert!(ordinary.get("batchId").is_none());
 }
 
 /// Waits for `check` to hold, for up to five seconds.
@@ -248,6 +261,14 @@ fn the_reference_header_is_checked() {
         HeaderValue::from_bytes(b"caf\xc3\xa9").unwrap(),
     );
     assert!(reference(&headers).is_err());
+}
+
+#[test]
+fn item_references_follow_the_header_rules() {
+    assert_eq!(validate_reference("  row-1  ").unwrap(), "row-1");
+    assert!(validate_reference("  ").is_err());
+    assert!(validate_reference("caf\u{00e9}").is_err());
+    assert!(validate_reference(&"x".repeat(MAX_REFERENCE + 1)).is_err());
 }
 
 #[tokio::test]

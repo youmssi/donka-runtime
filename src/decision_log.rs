@@ -72,11 +72,19 @@ pub fn reference(headers: &HeaderMap) -> Result<Option<String>, InvalidReference
     let Some(value) = headers.get(REFERENCE_HEADER) else {
         return Ok(None);
     };
-    let text = value.to_str().map_err(|_| InvalidReference)?.trim();
-    if text.is_empty() || text.len() > MAX_REFERENCE {
+    validate_reference(value.to_str().map_err(|_| InvalidReference)?).map(Some)
+}
+
+/// Validates an item-level reference using the same rules as the request header.
+pub fn validate_reference(value: &str) -> Result<String, InvalidReference> {
+    let text = value.trim();
+    if text.is_empty()
+        || text.len() > MAX_REFERENCE
+        || !text.bytes().all(|byte| (b' '..=b'~').contains(&byte))
+    {
         return Err(InvalidReference);
     }
-    Ok(Some(text.to_owned()))
+    Ok(text.to_owned())
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -90,6 +98,18 @@ pub fn begin(
     key: &str,
     reference: Option<String>,
     input: &Value,
+) -> Option<Pending> {
+    begin_batch(release, key, reference, input, None)
+}
+
+/// Starts a record for one item in a batch. Every item's record remains
+/// independently addressable while sharing the batch identifier.
+pub fn begin_batch(
+    release: Option<&ReleaseData>,
+    key: &str,
+    reference: Option<String>,
+    input: &Value,
+    batch_id: Option<Uuid>,
 ) -> Option<Pending> {
     let feed = FEED.get()?.as_ref()?;
     let release = release?;
@@ -113,6 +133,7 @@ pub fn begin(
             environment: environment.to_string(),
             decision_key: key.to_owned(),
             reference,
+            batch_id,
             evaluated_at: Utc::now(),
             duration_us: 0,
             status: Status::Succeeded,
@@ -187,6 +208,8 @@ pub struct Record {
     pub decision_key: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reference: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_id: Option<Uuid>,
     pub evaluated_at: DateTime<Utc>,
     /// How long the evaluation took, in microseconds.
     pub duration_us: u64,

@@ -31,6 +31,8 @@ the other stops startup.
 - **Reference.** Callers may send `X-Donka-Reference` (1 to 200 visible ASCII characters, e.g. an
   application number) to find the decision in Studio; anything else is refused with `400`.
   Every logged answer, successful or not, carries `X-Decision-Id`, the record's id.
+- **Batch.** The batch evaluation endpoint gives each logged item its own decision id and a shared
+  `batchId`; Studio's decision log can filter on that id. It is optional on ordinary evaluations.
 - **Trace.** The trace is always recorded, for replay; the answer includes it only when the
   caller asks (`trace: true`), as before.
 - Only artifacts that name their project, release and environment (as Studio writes them) are

@@ -44,6 +44,28 @@ pub struct EnvironmentConfig {
 
     #[serde(default)]
     pub artifact: ArtifactConfig,
+
+    #[serde(default)]
+    pub batch_evaluation: BatchEvaluationConfig,
+}
+
+/// Limits the number of decision inputs accepted by one batch request.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BatchEvaluationConfig {
+    #[serde(default = "default_batch_max_inputs")]
+    pub max_inputs: usize,
+}
+
+impl Default for BatchEvaluationConfig {
+    fn default() -> Self {
+        Self {
+            max_inputs: default_batch_max_inputs(),
+        }
+    }
+}
+
+fn default_batch_max_inputs() -> usize {
+    100
 }
 
 /// Public keys Studio signs release artifacts with (DNK-87), each written
@@ -369,6 +391,7 @@ impl Default for EnvironmentConfig {
             decision_log: DecisionLogConfig::default(),
             rate_limit: RateLimitConfig::default(),
             artifact: ArtifactConfig::default(),
+            batch_evaluation: BatchEvaluationConfig::default(),
         }
     }
 }
@@ -534,6 +557,17 @@ mod tests {
         assert_eq!(config.tsgo.memory_bytes, 2 << 30);
         assert_eq!(config.tsgo.timeout, Duration::from_secs(30));
         assert_eq!(config.tsgo.cache_capacity, 4_096);
+    }
+
+    #[test]
+    fn batch_evaluation_limit_defaults_and_reads_the_documented_setting() {
+        assert_eq!(parse(&[]).batch_evaluation.max_inputs, 100);
+        assert_eq!(
+            parse(&[("BATCH_EVALUATION__MAX_INPUTS", "25")])
+                .batch_evaluation
+                .max_inputs,
+            25
+        );
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use crate::Agent;
+use crate::config::BatchEvaluationConfig;
 use crate::contract;
 use crate::decision_log;
 use crate::engine_ext::EngineExtension;
@@ -13,12 +14,46 @@ use std::sync::Arc;
 use tokio_util::task::LocalPoolHandle;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+use uuid::Uuid;
 use zen_engine::EvaluationOptions;
 
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct EvaluateRequest {
     context: Value,
     trace: Option<bool>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct BatchEvaluateRequest {
+    inputs: Vec<BatchEvaluateInput>,
+    trace: Option<bool>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct BatchEvaluateInput {
+    input: Value,
+    #[serde(default)]
+    reference: Option<String>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchEvaluateResponse {
+    batch_id: String,
+    items: Vec<BatchEvaluateItem>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchEvaluateItem {
+    index: usize,
+    status: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    decision_id: Option<String>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -170,6 +205,169 @@ pub async fn evaluate(
         response.headers_mut().insert(name, value);
     }
     Ok(response)
+}
+
+/// Evaluates ordered inputs against the same project release. Each item gets
+/// an independent result and decision-log record.
+#[utoipa::path(
+    post,
+    path = "/api/projects/{project}/evaluate-batch/{*key}",
+    params(
+        ("project" = String, Path, description = "Project slug or id"),
+        ("key" = String, Path, description = "Key (path) of decision model")
+    ),
+    request_body = BatchEvaluateRequest,
+    responses((status = OK, body = BatchEvaluateResponse))
+)]
+pub async fn evaluate_batch(
+    headers: HeaderMap,
+    Extension(local_pool): Extension<LocalPoolHandle>,
+    Extension(agent): Extension<Agent>,
+    Extension(limits): Extension<BatchEvaluationConfig>,
+    limiter: Option<Extension<crate::rate_limit::RateLimiter>>,
+    Path((project, key)): Path<(Arc<str>, Arc<str>)>,
+    Json(payload): Json<BatchEvaluateRequest>,
+) -> Result<Json<BatchEvaluateResponse>, EvaluateError> {
+    let Some(project_data) = agent.project(&project) else {
+        return Err((StatusCode::NOT_FOUND, anyhow!("Project not found")).into());
+    };
+    let access_token = headers
+        .get("X-Access-Token")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    if !project_data.engine.can_access(access_token) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            anyhow!("Invalid X-Access-Token Header"),
+        )
+            .into());
+    }
+    if payload.inputs.is_empty() || payload.inputs.len() > limits.max_inputs {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            anyhow!(
+                "Batch must contain between 1 and {} inputs",
+                limits.max_inputs
+            ),
+        )
+            .into());
+    }
+    let batch_reference = decision_log::reference(&headers)
+        .map_err(|error| EvaluateError::from(anyhow::Error::new(error)))?;
+    let inputs = payload
+        .inputs
+        .into_iter()
+        .map(|item| {
+            let reference = item
+                .reference
+                .map(|value| decision_log::validate_reference(&value))
+                .transpose()
+                .map_err(|error| EvaluateError::from(anyhow::Error::new(error)))?
+                .or_else(|| batch_reference.clone());
+            Ok((item.input, reference))
+        })
+        .collect::<Result<Vec<_>, EvaluateError>>()?;
+    let release = project_data.engine.release_data();
+    let batch_id = Uuid::new_v4();
+    let mut items = Vec::with_capacity(inputs.len());
+    for (index, (input, reference)) in inputs.into_iter().enumerate() {
+        if let Some(Extension(limiter)) = &limiter {
+            if let Err(wait) = limiter.charge(access_token) {
+                let seconds = wait.as_secs() + u64::from(wait.subsec_nanos() > 0);
+                items.push(BatchEvaluateItem {
+                    index,
+                    status: StatusCode::TOO_MANY_REQUESTS.as_u16(),
+                    result: None,
+                    error: Some(serde_json::json!({"message": format!("Too many requests for this access token; retry in {seconds} s"), "retryAfter": seconds})),
+                    decision_id: None,
+                });
+                continue;
+            }
+        }
+        let logged =
+            decision_log::begin_batch(release.as_ref(), &key, reference, &input, Some(batch_id));
+        let wants_trace = payload.trace.unwrap_or(false);
+        let trace = wants_trace || logged.is_some();
+        let engine = project_data.clone();
+        let evaluation_key = key.clone();
+        let evaluation_input = input.clone();
+        let evaluated = local_pool
+            .spawn_pinned(move || async move {
+                engine
+                    .engine
+                    .evaluate_with_opts(
+                        &evaluation_key,
+                        evaluation_input.into(),
+                        EvaluationOptions {
+                            trace,
+                            max_depth: 10,
+                        },
+                    )
+                    .await
+                    .map(|value| serde_json::to_value(value).context("Failed to serialize value"))
+                    .map_err(|error| {
+                        (
+                            error.to_string(),
+                            decision_log::error_trace(&error),
+                            contract::violation(&engine.engine, &evaluation_key, &error),
+                        )
+                    })
+            })
+            .await
+            .expect("Thread failed to join");
+        match evaluated {
+            Ok(Ok(mut value)) => {
+                let decision_id = logged.map(|entry| {
+                    let (_, value) = entry.succeeded(&mut value, wants_trace);
+                    value.to_str().unwrap_or_default().to_owned()
+                });
+                items.push(BatchEvaluateItem {
+                    index,
+                    status: 200,
+                    result: Some(value),
+                    error: None,
+                    decision_id,
+                });
+            }
+            Ok(Err(error)) => {
+                let body = serde_json::json!({"message": "Failed to serialize the response"});
+                tracing::error!(error = %error, "Failed to serialize the response");
+                let decision_id = logged.map(|entry| {
+                    let (_, value) = entry.failed(&body, None);
+                    value.to_str().unwrap_or_default().to_owned()
+                });
+                items.push(BatchEvaluateItem {
+                    index,
+                    status: 500,
+                    result: None,
+                    error: Some(body),
+                    decision_id,
+                });
+            }
+            Err((message, trace, violation)) => {
+                let failure: EvaluateError = match violation {
+                    Some(violation) => EvaluateError::Contract(anyhow!(message), violation),
+                    None => EvaluateError::Anyhow((StatusCode::BAD_REQUEST, anyhow!(message))),
+                };
+                let (status, body) = failure.parts();
+                let decision_id = logged.map(|entry| {
+                    let (_, value) = entry.failed(&body, trace);
+                    value.to_str().unwrap_or_default().to_owned()
+                });
+                items.push(BatchEvaluateItem {
+                    index,
+                    status: status.as_u16(),
+                    result: None,
+                    error: Some(body),
+                    decision_id,
+                });
+            }
+        }
+    }
+    Ok(Json(BatchEvaluateResponse {
+        batch_id: batch_id.to_string(),
+        items,
+    }))
 }
 
 /// The error answer, with the decision log's record of it.
