@@ -36,6 +36,22 @@ secrets:
 
 On Kubernetes, mount the secret as a volume and point `X_FILE` at the file.
 
+## Batch evaluation
+
+`POST /api/projects/{project}/evaluate-batch/{key}` accepts an ordered `inputs` array of
+`{ "input": ..., "reference": "..." }` items. `reference` is optional; when omitted, the
+`X-Donka-Reference` request header is used. Each input is evaluated and logged independently;
+the response preserves its position and includes
+the shared `batchId` plus a `decisionId` for each logged item. A failed item does not prevent
+later inputs from running. The endpoint uses the same project access token and charges the
+configured Runtime rate limit once per input.
+
+```bash
+BATCH_EVALUATION__MAX_INPUTS=100 # maximum inputs accepted in one request
+```
+
+The default maximum is 100. Requests with no inputs or more than this limit receive `400`.
+
 ## Release storage
 
 Where the Runtime finds published releases. Donka Studio publishes each environment's releases
