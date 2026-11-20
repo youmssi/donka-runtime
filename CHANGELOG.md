@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.29.0](https://github.com/youmssi/donka-runtime/compare/v1.28.1...v1.29.0) (2026-11-20)
+
+
+### Features
+
+* **access:** hashed access tokens, one environment each ([#4](https://github.com/youmssi/donka-runtime/issues/4)) ([3d0afc4](https://github.com/youmssi/donka-runtime/commit/3d0afc4999c519606298c98d45a1cc80e2bd90a3))
+* **config:** read secret settings from files ([#15](https://github.com/youmssi/donka-runtime/issues/15)) ([4cedaaa](https://github.com/youmssi/donka-runtime/commit/4cedaaa81a2dca49044fa266c0b4e422098f02e5))
+* **connectors:** call outside services from connector nodes ([#5](https://github.com/youmssi/donka-runtime/issues/5)) ([5328419](https://github.com/youmssi/donka-runtime/commit/532841918709fa22baf6e2c8a577e61a67b951df))
+* **connectors:** OAuth2 client credentials and mutual TLS ([#14](https://github.com/youmssi/donka-runtime/issues/14)) ([9220ab7](https://github.com/youmssi/donka-runtime/commit/9220ab7ac8fa1cf7cab1668e16287abbb5216883))
+* **connectors:** secrets go only to the hosts the installation allows ([#21](https://github.com/youmssi/donka-runtime/issues/21)) ([7043116](https://github.com/youmssi/donka-runtime/commit/70431161efecf28c32eefaf48a7ef7bca6baba9d))
+* **decision-log:** send every evaluation to Studio's decision log ([#6](https://github.com/youmssi/donka-runtime/issues/6)) ([56af492](https://github.com/youmssi/donka-runtime/commit/56af4927ac8fe0cf0f1fd90cb00913b705921f2f))
+* **engine:** evaluate portfolio inputs in batches ([#33](https://github.com/youmssi/donka-runtime/issues/33)) ([9337eec](https://github.com/youmssi/donka-runtime/commit/9337eec920eca86568c1b2cc1eb04a25f4a21407))
+* **engine:** name the field when a request breaks the input contract ([b399f8e](https://github.com/youmssi/donka-runtime/commit/b399f8eacceece69bbeda5acb3ce17412cbce96b))
+* **engine:** name the field when a request breaks the input contract ([bb1d967](https://github.com/youmssi/donka-runtime/commit/bb1d96742571f2a80e63add45a9733b43b521ce2))
+* **engine:** zen-engine 2.1.6 ([#13](https://github.com/youmssi/donka-runtime/issues/13)) ([3a2d5a2](https://github.com/youmssi/donka-runtime/commit/3a2d5a2c094e8dac9819a085cf17a16d7d4d2a31))
+* **infra:** add signed immutable release candidates ([f0d43c5](https://github.com/youmssi/donka-runtime/commit/f0d43c5e68cfd568745964c87075020172121257))
+* per-token rate limits answered with 429 and Retry-After ([ca9083c](https://github.com/youmssi/donka-runtime/commit/ca9083cc7d71d6c26e449c5191cccd9d66f5e2bc))
+* per-token rate limits answered with 429 and Retry-After ([6f9eb9b](https://github.com/youmssi/donka-runtime/commit/6f9eb9b0f15dafa943d66a1ebc8880d3727f255d))
+* **provider:** serve Studio's release folder with hot reload ([#17](https://github.com/youmssi/donka-runtime/issues/17)) ([96761ba](https://github.com/youmssi/donka-runtime/commit/96761babf4a452ebf60bbad694bd5e01b2fb9200))
+* **runtime:** verify signed release artifacts ([#22](https://github.com/youmssi/donka-runtime/issues/22)) ([e33f63c](https://github.com/youmssi/donka-runtime/commit/e33f63c23ab37176c6c6ec8e8e9b35d0a173bc4e))
+
+
+### Bug Fixes
+
+* **engine:** function nodes cannot reach the network ([#20](https://github.com/youmssi/donka-runtime/issues/20)) ([81a0d22](https://github.com/youmssi/donka-runtime/commit/81a0d22f7b3e8685295aa09d321f307b360f7fea))
+* **infra:** add Runtime image verification key ([#27](https://github.com/youmssi/donka-runtime/issues/27)) ([6f5134e](https://github.com/youmssi/donka-runtime/commit/6f5134e95b175eea4c3fc666900ae77d5cda5ce7))
+* **infra:** restrict Scorecard to the default branch ([2e3e07e](https://github.com/youmssi/donka-runtime/commit/2e3e07ea7b836286ca8770206a69f205856a8e5e))
+* **infra:** select OCI tags for image publishing ([b021d7b](https://github.com/youmssi/donka-runtime/commit/b021d7ba37b72ff3fbc3482e3920d3a26f738f5c))
+* **security:** update quinn-udp lockfile ([73b6f79](https://github.com/youmssi/donka-runtime/commit/73b6f7995737fb9b875411d141e0a719ec61aaf6))
+* **security:** update wasmtime and rustls to patched releases ([#35](https://github.com/youmssi/donka-runtime/issues/35)) ([b18d9b3](https://github.com/youmssi/donka-runtime/commit/b18d9b3b12cc762290f390894b0db8205141118b))
+
 ## [1.28.1](https://github.com/gorules/agent/compare/v1.28.0...v1.28.1) (2026-08-24)
 
 
