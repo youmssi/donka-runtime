@@ -2073,7 +2073,7 @@ dependencies = [
 
 [[package]]
 name = "donka-connectors"
-version = "0.1.0"
+version = "1.29.0"
 dependencies = [
  "axum",
  "hyper-util",
@@ -2092,7 +2092,7 @@ dependencies = [
 
 [[package]]
 name = "donka-runtime"
-version = "1.28.1"
+version = "1.29.0"
 dependencies = [
  "anyhow",
  "async-trait",
