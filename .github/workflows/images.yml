@@ -59,7 +59,9 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ inputs.version && format('v{0}', inputs.version) || github.sha }}
+          # A candidate has no tag yet: its release stays a draft until the publish job, and a
+          # draft creates no Git tag. Build the candidate from the dispatched commit instead.
+          ref: ${{ (inputs.version != '' && inputs.candidate != true) && format('v{0}', inputs.version) || github.sha }}
 
       - name: Signing key
         id: key
