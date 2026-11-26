@@ -115,7 +115,9 @@ jobs:
             await writeFile(process.env.ASSET_NAME, `${JSON.stringify(manifest, null, 2)}\n`);
           '
           gh release upload "$RELEASE_TAG" "$ASSET_NAME"
-          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.id')
+          # The release is still a draft here, and the REST by-tag lookup does not return
+          # drafts. Resolve it the way the upload above already does.
+          release_id=$(gh release view "$RELEASE_TAG" --json databaseId --jq .databaseId)
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
             -F draft=false -F prerelease=true -f make_latest=false >/dev/null
           gh release view "$RELEASE_TAG" --json isImmutable,isPrerelease,tagName \
